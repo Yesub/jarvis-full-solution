@@ -1,0 +1,75 @@
+# Dépendances
+
+node_modules/
+venv/
+env/
+**pycache**/
+\*.pyc
+.Python
+
+# Build et dist
+
+dist/
+build/
+_.egg-info/
+_.min.js
+_.bundle.js
+_.map
+
+# Tests et couverture
+
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Documentation
+
+docs/\_build/
+\*.md
+!README.md
+
+# Médias
+
+_.jpg
+_.jpeg
+_.png
+_.gif
+_.ico
+_.svg
+_.mp4
+_.webm
+\*.pdf
+
+# Logs et bases
+
+_.log
+_.sql
+_.sqlite
+_.db
+
+# Configs lourdes
+
+package-lock.json
+yarn.lock
+Pipfile.lock
+poetry.lock
+
+# IDE
+
+.vscode/
+.idea/
+_.swp
+_.swo
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Secrets
+
+.env
+.env.\*
+_.pem
+_.key
