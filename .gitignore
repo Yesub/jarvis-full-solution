@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Qdrant local data
+docker-qdrant/qdrant_storage/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Angular
+.angular/cache
+
+# Uploads
+jarvis/uploads/
+
+# Logs
+*.log

@@ -1,0 +1,140 @@
+<div class="rag-container">
+  @if (busy()) {
+    <mat-progress-bar mode="indeterminate" />
+  }
+
+  <!-- 1. Ingest -->
+  <mat-card>
+    <mat-card-header>
+      <mat-card-title>1 — Apprentissage / Ingest</mat-card-title>
+      <mat-card-subtitle>Indexez un fichier dans la base vectorielle (Qdrant).</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <input type="file" #fileInput style="display: none" (change)="onFile($event)" />
+      <div class="file-row">
+        <button mat-stroked-button type="button" (click)="fileInput.click()">
+          Choisir un fichier
+        </button>
+        @if (selectedFile()) {
+          <span class="file-name">{{ selectedFile()!.name }}</span>
+        }
+      </div>
+    </mat-card-content>
+    <mat-card-actions>
+      <button
+        mat-raised-button
+        color="primary"
+        [disabled]="!selectedFile() || busy()"
+        (click)="doIngest()"
+      >
+        Ingest
+      </button>
+    </mat-card-actions>
+    @if (ingestResult()) {
+      <mat-card-content>
+        <pre class="result-pre">{{ ingestResult() | json }}</pre>
+      </mat-card-content>
+    }
+  </mat-card>
+
+  <mat-divider />
+
+  <!-- 2. RAG -->
+  <mat-card>
+    <mat-card-header>
+      <mat-card-title>2 — Question via RAG</mat-card-title>
+      <mat-card-subtitle>La réponse s'appuie sur les documents ingérés.</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Votre question</mat-label>
+        <textarea
+          matInput
+          rows="4"
+          [ngModel]="questionRag()"
+          (ngModelChange)="questionRag.set($event)"
+        ></textarea>
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>Top K</mat-label>
+        <input
+          matInput
+          type="number"
+          min="1"
+          [ngModel]="topK()"
+          (ngModelChange)="topK.set(+$event)"
+        />
+      </mat-form-field>
+    </mat-card-content>
+    <mat-card-actions>
+      <button mat-raised-button color="primary" [disabled]="busy()" (click)="doAskRag()">
+        Interroger (RAG)
+      </button>
+      <button
+        mat-icon-button
+        [color]="recordingFor() === 'rag' ? 'warn' : ''"
+        [disabled]="transcribing() || busy()"
+        [class.recording-pulse]="recordingFor() === 'rag'"
+        (click)="toggleMic('rag')"
+        [title]="recordingFor() === 'rag' ? 'Arrêter l\'enregistrement' : 'Dicter la question'"
+      >
+        <mat-icon>{{ recordingFor() === 'rag' ? 'stop_circle' : 'mic' }}</mat-icon>
+      </button>
+      @if (transcribing()) {
+        <span class="transcribing-label">Transcription en cours...</span>
+      }
+    </mat-card-actions>
+    @if (streamingText() && activeMode() === 'rag') {
+      <mat-card-content>
+        <pre class="result-pre">{{ streamingText() }}</pre>
+        @if (ragSources().length) {
+          <pre class="result-pre sources-pre">Sources : {{ ragSources().join(', ') }}</pre>
+        }
+      </mat-card-content>
+    }
+  </mat-card>
+
+  <mat-divider />
+
+  <!-- 3. LLM -->
+  <mat-card>
+    <mat-card-header>
+      <mat-card-title>3 — Question sans RAG</mat-card-title>
+      <mat-card-subtitle>Interrogation directe du LLM (Ollama), sans contexte documentaire.</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Votre prompt</mat-label>
+        <textarea
+          matInput
+          rows="4"
+          [ngModel]="prompt()"
+          (ngModelChange)="prompt.set($event)"
+        ></textarea>
+      </mat-form-field>
+    </mat-card-content>
+    <mat-card-actions>
+      <button mat-raised-button color="primary" [disabled]="busy()" (click)="doAskLlm()">
+        Interroger (LLM)
+      </button>
+      <button
+        mat-icon-button
+        [color]="recordingFor() === 'llm' ? 'warn' : ''"
+        [disabled]="transcribing() || busy()"
+        [class.recording-pulse]="recordingFor() === 'llm'"
+        (click)="toggleMic('llm')"
+        [title]="recordingFor() === 'llm' ? 'Arrêter l\'enregistrement' : 'Dicter le prompt'"
+      >
+        <mat-icon>{{ recordingFor() === 'llm' ? 'stop_circle' : 'mic' }}</mat-icon>
+      </button>
+      @if (transcribing()) {
+        <span class="transcribing-label">Transcription en cours...</span>
+      }
+    </mat-card-actions>
+    @if (streamingText() && activeMode() === 'llm') {
+      <mat-card-content>
+        <pre class="result-pre">{{ streamingText() }}</pre>
+      </mat-card-content>
+    }
+  </mat-card>
+</div>
