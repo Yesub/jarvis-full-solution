@@ -24,6 +24,9 @@ class Config:
     # STT Server
     stt_server_url: str = "http://127.0.0.1:8300"
 
+    # Jarvis Backend API
+    jarvis_api_url: str = "http://127.0.0.1:3000"
+
 
 def load_config() -> Config:
     return Config(
@@ -35,4 +38,5 @@ def load_config() -> Config:
         chunk_size=int(os.getenv("CHUNK_SIZE", "1280")),
         sample_rate=int(os.getenv("SAMPLE_RATE", "16000")),
         stt_server_url=os.getenv("STT_SERVER_URL", "http://127.0.0.1:8300"),
+        jarvis_api_url=os.getenv("JARVIS_API_URL", "http://127.0.0.1:3000"),
     )

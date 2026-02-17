@@ -28,7 +28,7 @@ export class OllamaService {
     this.baseUrl =
       this.config.get<string>('OLLAMA_BASE_URL') ?? 'http://127.0.0.1:11434';
     this.llmModel =
-      this.config.get<string>('OLLAMA_LLM_MODEL') ?? 'gpt-oss:20b';
+      this.config.get<string>('OLLAMA_LLM_MODEL') ?? 'mistral:latest';
     this.embedModel =
       this.config.get<string>('OLLAMA_EMBED_MODEL') ?? 'qwen3-embedding:8b';
   }

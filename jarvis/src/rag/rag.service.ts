@@ -85,6 +85,52 @@ export class RagService {
     }
   }
 
+  async ingestText(
+    text: string,
+    source: string = 'manual-input',
+    contextType: string = 'memory',
+    eventDate?: string,
+  ): Promise<{ source: string; chunks: number; upserted: number }> {
+    try {
+      const split = this.splitter();
+      const chunks = await split.splitText(text);
+
+      const probe = await this.ollama.embed(['dimension probe']);
+      const dim = probe[0].length;
+      await this.vs.ensureMemoryCollection(dim);
+
+      const batchSize = 64;
+      const addedAt = new Date().toISOString();
+      let upserted = 0;
+
+      for (let i = 0; i < chunks.length; i += batchSize) {
+        const batch = chunks.slice(i, i + batchSize);
+        const vectors = await this.ollama.embed(batch);
+
+        const points = batch.map((chunkText, j) => ({
+          id: uuidv4(),
+          vector: vectors[j],
+          payload: {
+            source,
+            chunkIndex: i + j,
+            text: chunkText,
+            addedAt,
+            contextType,
+            ...(eventDate !== undefined ? { eventDate } : {}),
+          } satisfies RagPayload,
+        }));
+
+        await this.vs.upsertMemory(points);
+        upserted += points.length;
+      }
+
+      return { source, chunks: chunks.length, upserted };
+    } catch (error) {
+      this.logger.error(`Ingestion texte échouée pour "${source}"`, error);
+      throw new InternalServerErrorException("L'ingestion du texte a échoué");
+    }
+  }
+
   async askStream(
     question: string,
     topK?: number,

@@ -8,14 +8,15 @@ au serveur STT pour transcription.
 
 import logging
 import signal
-import sys
 
 import numpy as np
 import pyaudio
 import openwakeword
 from openwakeword.model import Model
 
+from command_classifier import CommandType, classify
 from config import load_config
+from jarvis_client import JarvisClient
 from recorder import record_until_silence
 from stt_client import SttClient
 
@@ -32,6 +33,44 @@ def shutdown(sig, frame):
     global running
     logger.info("Signal d'arret recu.")
     running = False
+
+
+def _route_command(text: str, jarvis_client: JarvisClient) -> None:
+    """
+    Classifie la transcription et route vers le bon endpoint de la mémoire.
+
+    - ADD   → POST /memory/add  (mémorisation d'une information)
+    - QUERY → POST /memory/query (interrogation avec réponse LLM)
+    - UNKNOWN → log simple, aucun appel backend
+    """
+    command_type, content = classify(text)
+
+    if command_type == CommandType.ADD:
+        logger.info("Commande ADD détectée. Contenu à mémoriser: %s", content)
+        result = jarvis_client.add_memory(content)
+        if result:
+            logger.info(
+                "Mémorisé. eventDate=%s expression=%s",
+                result.get("eventDate", "—"),
+                result.get("expression", "—"),
+            )
+        else:
+            logger.warning("L'ajout en mémoire a échoué (backend injoignable ou erreur).")
+
+    elif command_type == CommandType.QUERY:
+        logger.info("Commande QUERY détectée. Question: %s", content)
+        result = jarvis_client.query_memory(content)
+        if result:
+            logger.info(
+                "RÉPONSE JARVIS: %s  [contexte temporel: %s]",
+                result.get("answer", ""),
+                result.get("temporalContext", "aucun"),
+            )
+        else:
+            logger.warning("La requête mémoire a échoué (backend injoignable ou erreur).")
+
+    else:
+        logger.info("Commande non reconnue (UNKNOWN). Texte ignoré: %s", text)
 
 
 def main():
@@ -56,6 +95,7 @@ def main():
     )
 
     stt_client = SttClient(config)
+    jarvis_client = JarvisClient(config)
 
     logger.info(
         "Ecoute du wake word '%s' en cours... (Ctrl+C pour arreter)",
@@ -92,7 +132,7 @@ def main():
 
                     if text:
                         logger.info("TRANSCRIPTION: %s", text)
-                        # TODO: Envoyer le texte au backend NestJS pour traitement
+                        _route_command(text, jarvis_client)
                     else:
                         logger.info("Aucune parole detectee ou transcription vide.")
 

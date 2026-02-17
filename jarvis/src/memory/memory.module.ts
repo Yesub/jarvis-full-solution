@@ -2,12 +2,13 @@ import { Module } from '@nestjs/common';
 import { OllamaModule } from '../ollama/ollama.module';
 import { VectorstoreModule } from '../vectorstore/vectorstore.module';
 import { TemporalModule } from '../temporal/temporal.module';
-import { RagService } from './rag.service';
-import { RagController } from './rag.controller';
+import { MemoryService } from './memory.service';
+import { MemoryController } from './memory.controller';
 
 @Module({
   imports: [OllamaModule, VectorstoreModule, TemporalModule],
-  providers: [RagService],
-  controllers: [RagController],
+  providers: [MemoryService],
+  controllers: [MemoryController],
+  exports: [MemoryService],
 })
-export class RagModule {}
+export class MemoryModule {}

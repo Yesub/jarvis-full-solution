@@ -21,6 +21,7 @@ Angular (4200) ──HTTP/CORS──► NestJS (3000) ──► Ollama (11434)  
                                              ──► STT Server (8300) [Transcription audio]
 
 Wake Listener (micro local) ──► STT Server (8300) [Transcription audio]
+                            ──► NestJS (3000)      [Mémoire : /memory/add, /memory/query]
 ```
 
 ## Composants
@@ -32,16 +33,43 @@ Point d'entrée : `src/main.ts` (port 3000, Swagger sur `/api`)
 Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor` (logs method/URL/durée), `ValidationPipe` (whitelist + transform)
 
 | Module / Controller | Routes | Rôle |
-|---------------------|--------|------|
-| RAG | `POST /rag/ingest` (max 50 MB), `/rag/ask`, `/rag/ask/stream` | Ingestion de documents (PDF/TXT/MD), Q&A avec contexte vectoriel. Le stream émet `event: metadata` (sources, topK) puis les tokens |
+| ------------------- | ------ | ---- |
+| RAG | `POST /rag/ingest` (max 50 MB), `/rag/ask`, `/rag/ask/stream` | Ingestion de documents (PDF/TXT/MD) et texte brut, Q&A avec contexte vectoriel. Le stream émet `event: metadata` (sources, topK) puis les tokens |
+| Memory | `POST /memory/add`, `/memory/search`, `/memory/query` | Mémoire conversationnelle persistante avec contexte temporel. `/memory/add` stocke un fait, `/memory/search` cherche par similarité + filtre date, `/memory/query` répond en langage naturel avec contexte LLM |
 | LLM | `POST /llm/ask`, `/llm/ask/stream` | Génération LLM directe sans contexte RAG (pas de system prompt) |
 | STT | `POST /stt/transcribe` (max 25 MB) | Proxy vers le serveur Python Whisper (fichier temp supprimé après transcription) |
 | HealthController | `GET /health` | Check de santé (controller standalone dans AppModule, pas de module dédié) |
 | ConfigModule | (global) | Chargement `.env` via `@nestjs/config` |
 | Ollama | (service interne) | Client Ollama `/api/embed` et `/api/generate` |
-| Vectorstore | (service interne) | Client Qdrant (lève `ConflictException` si dimension embedding change) |
+| Vectorstore | (service interne) | Client Qdrant, gère deux collections : `domainknowledge` (documents) et `jarvis_for_home` (mémoire) |
+| Temporal | (service interne) | Extraction d'expressions temporelles françaises via chrono-node (`chrono.fr.parse`) |
 
-**Stack :** NestJS 11, TypeScript, LangChain (PDFLoader, text splitting), Qdrant JS Client, class-validator, class-transformer
+**Stack :** NestJS 11, TypeScript, LangChain (PDFLoader, text splitting), Qdrant JS Client, chrono-node, class-validator, class-transformer
+
+#### Module Memory (`src/memory/`)
+
+- **MemoryService** : coordonne Ollama (embeddings + génération), VectorstoreService (collection `jarvis_for_home`) et TemporalService
+  - `add(text, source?, contextType?)` : extrait la date d'événement via TemporalService, embed le texte, stocke dans Qdrant avec `addedAt` et `eventDate` optionnel
+  - `search(query, topK?, dateFilter?)` : recherche sémantique avec filtre de plage de dates optionnel (`eventDate` ou `addedAt`)
+  - `query(question, topK?)` : Q&A complet — parse le contexte temporel, filtre auto sur `eventDate` du même jour, génère une réponse LLM en français. Retourne `{ answer, sources, topK, temporalContext? }`
+- **DTOs** : `MemoryAddDto`, `MemorySearchDto` (avec `DateFilterDto` imbriqué), `MemoryQueryDto`
+
+#### Module Temporal (`src/temporal/`)
+
+- **TemporalService** : parse les expressions de date/heure en français (ex. "ce soir à 20h", "demain", "vendredi prochain")
+  - `parse(text, referenceDate?)` → `TemporalResult | null` (première expression)
+  - `parseAll(text, referenceDate?)` → `TemporalResult[]` (toutes les expressions)
+  - `TemporalResult` : `{ expression: string, resolvedDate: string }` (ISO 8601 UTC)
+  - Option `forwardDate: true` pour résoudre les ambiguïtés vers le futur
+
+#### Stratégie Qdrant dual-collection
+
+| Collection | Usage | Champs payload |
+| ---------- | ----- | -------------- |
+| `domainknowledge` | Documents RAG (PDF/TXT/MD) | `source`, `chunkIndex`, `text` |
+| `jarvis_for_home` | Mémoire conversationnelle | `source`, `text`, `addedAt`, `contextType`, `eventDate?` |
+
+Les index datetime sont créés automatiquement sur `addedAt` et `eventDate` dans `jarvis_for_home`.
 
 ### jarvis-ui/ — Frontend Angular
 
@@ -50,6 +78,7 @@ Point d'entrée : `src/main.ts` (port 4200)
 Architecture **standalone components** (pas de NgModules). Route unique `''` avec lazy-loading de `RagComponent`.
 
 Page unique (`RagComponent`) avec 3 sections :
+
 1. **Ingestion** — Upload de fichiers vers la base vectorielle
 2. **RAG** — Questions avec contexte documentaire (streaming SSE)
 3. **LLM** — Questions directes au LLM (streaming SSE)
@@ -84,16 +113,26 @@ Point d'entrée : `wake_listener.py`
 - Détecte le wake word "Hey Jarvis" via OpenWakeWord (seuil configurable)
 - Enregistre la commande vocale jusqu'à détection de silence (RMS)
 - Envoie l'audio WAV au serveur STT pour transcription
-- **TODO :** l'intégration avec le backend NestJS n'est pas encore implémentée (le texte transcrit est loggé mais pas envoyé)
+- Classifie la transcription et route vers le backend NestJS (mémoire)
 
 | Fichier | Rôle |
 | ------- | ---- |
-| `wake_listener.py` | Boucle principale : écoute micro → détection wake word → enregistrement → transcription |
-| `config.py` | Configuration via variables d'environnement (dataclass) |
+| `wake_listener.py` | Boucle principale : écoute micro → wake word → enregistrement → STT → classification → routage backend |
+| `config.py` | Configuration via variables d'environnement (dataclass), inclut `JARVIS_API_URL` |
 | `recorder.py` | Enregistrement audio post-wake avec détection de silence par RMS |
 | `stt_client.py` | Client HTTP pour envoi audio au serveur STT (`POST /transcribe`) |
+| `command_classifier.py` | Classifie la transcription en `ADD` / `QUERY` / `UNKNOWN` via regex français |
+| `jarvis_client.py` | Client HTTP pour le backend NestJS (`/memory/add`, `/memory/query`) |
 
 **Stack :** Python, OpenWakeWord, PyAudio, NumPy, requests, python-dotenv
+
+#### Classification des commandes vocales (`command_classifier.py`)
+
+| Type | Patterns déclencheurs (exemples) | Action |
+| ---- | --------------------------------- | ------ |
+| `ADD` | "Ajoute que", "Mémorise", "Retiens", "Note", "N'oublie pas", "Enregistre" | Supprime le préfixe et appelle `/memory/add` |
+| `QUERY` | "qu'est-ce que", "rappelle-moi", "dis-moi", "quand", "à quelle heure", "ai-je prévu" | Envoie la question à `/memory/query` |
+| `UNKNOWN` | Tout le reste | Log uniquement, pas d'appel backend |
 
 ### docker-qdrant/ — Base vectorielle
 
@@ -118,6 +157,7 @@ OLLAMA_EMBED_MODEL=qwen3-embedding:8b
 # Qdrant
 QDRANTURL=http://127.0.0.1:6333
 QDRANTCOLLECTION=domainknowledge
+QDRANT_MEMORY_COLLECTION=jarvis_for_home
 
 # RAG
 RAG_TOP_K=5
@@ -156,6 +196,9 @@ CHUNK_SIZE=1280
 
 # STT Server
 STT_SERVER_URL=http://127.0.0.1:8300
+
+# Jarvis Backend
+JARVIS_API_URL=http://127.0.0.1:3000
 ```
 
 ## Commandes de développement
@@ -179,13 +222,24 @@ cd docker-qdrant && docker-compose up -d
 
 ## Flux de données principaux
 
-**Ingestion :** Upload fichier → parsing (LangChain) → chunking (1000 chars, overlap 150) → embeddings (Ollama) → stockage Qdrant
+**Ingestion document :** Upload fichier → parsing (LangChain) → chunking (1000 chars, overlap 150) → embeddings (Ollama) → stockage Qdrant (`domainknowledge`)
 
 **RAG Q&A :** Question → embedding → recherche Qdrant top-K → contexte + prompt → LLM → réponse streamée (SSE)
 
 **STT :** Microphone → WebM blob → NestJS proxy → FastAPI/Whisper → texte transcrit → champ de saisie
 
-**Wake Word :** Microphone (PyAudio) → OpenWakeWord ("Hey Jarvis") → enregistrement jusqu'au silence (RMS) → WAV → STT Server → texte transcrit
+**Wake Word → Mémoire :**
+
+```text
+Microphone (PyAudio) → OpenWakeWord ("Hey Jarvis")
+  → enregistrement jusqu'au silence (RMS) → WAV
+  → STT Server (Whisper) → texte transcrit
+  → command_classifier (ADD / QUERY / UNKNOWN)
+      ADD   → strip préfixe → /memory/add  → TemporalService → Qdrant (jarvis_for_home)
+      QUERY → /memory/query → TemporalService → Qdrant search → LLM → réponse loggée
+```
+
+**Mémoire Q&A :** Question → TemporalService (extraction date) → embedding → recherche Qdrant `jarvis_for_home` (filtre eventDate auto) → contexte + prompt français → LLM → `{ answer, sources, topK, temporalContext? }`
 
 ## Conventions
 
@@ -193,3 +247,5 @@ cd docker-qdrant && docker-compose up -d
 - Frontend Angular en architecture standalone components (pas de NgModules), tests avec vitest
 - API REST, streaming via Server-Sent Events (Fetch API + ReadableStream côté client)
 - Prompts système en français
+- Mémoire conversationnelle séparée des documents RAG (deux collections Qdrant distinctes)
+- Parsing temporel via chrono-node français (`forwardDate: true`)

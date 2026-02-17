@@ -8,6 +8,7 @@ import { VectorstoreModule } from './vectorstore/vectorstore.module';
 import { RagModule } from './rag/rag.module';
 import { LlmModule } from './llm/llm.module';
 import { SttModule } from './stt/stt.module';
+import { MemoryModule } from './memory/memory.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { SttModule } from './stt/stt.module';
     RagModule,
     LlmModule,
     SttModule,
+    MemoryModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
