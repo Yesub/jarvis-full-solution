@@ -114,17 +114,19 @@ Point d'entrée : `wake_listener.py`
 - Enregistre la commande vocale jusqu'à détection de silence (RMS)
 - Envoie l'audio WAV au serveur STT pour transcription
 - Classifie la transcription et route vers le backend NestJS (mémoire)
+- Répond vocalement à l'utilisateur via Piper TTS (synthèse vocale neurale locale)
 
 | Fichier | Rôle |
 | ------- | ---- |
-| `wake_listener.py` | Boucle principale : écoute micro → wake word → enregistrement → STT → classification → routage backend |
-| `config.py` | Configuration via variables d'environnement (dataclass), inclut `JARVIS_API_URL` |
+| `wake_listener.py` | Boucle principale : écoute micro → wake word → enregistrement → STT → classification → routage backend → réponse TTS |
+| `config.py` | Configuration via variables d'environnement (dataclass), inclut `JARVIS_API_URL` et config TTS |
 | `recorder.py` | Enregistrement audio post-wake avec détection de silence par RMS |
 | `stt_client.py` | Client HTTP pour envoi audio au serveur STT (`POST /transcribe`) |
 | `command_classifier.py` | Classifie la transcription en `ADD` / `QUERY` / `UNKNOWN` via regex français |
 | `jarvis_client.py` | Client HTTP pour le backend NestJS (`/memory/add`, `/memory/query`) |
+| `tts_client.py` | Synthèse vocale locale via Piper TTS (modèle `fr_FR-siwis-medium`, auto-téléchargé dans `models/`) |
 
-**Stack :** Python, OpenWakeWord, PyAudio, NumPy, requests, python-dotenv
+**Stack :** Python, OpenWakeWord, PyAudio, NumPy, requests, python-dotenv, piper-tts, sounddevice
 
 #### Classification des commandes vocales (`command_classifier.py`)
 
@@ -199,6 +201,10 @@ STT_SERVER_URL=http://127.0.0.1:8300
 
 # Jarvis Backend
 JARVIS_API_URL=http://127.0.0.1:3000
+
+# TTS (Piper)
+TTS_MODEL=fr_FR-siwis-medium
+TTS_ENABLED=true
 ```
 
 ## Commandes de développement
@@ -235,8 +241,8 @@ Microphone (PyAudio) → OpenWakeWord ("Hey Jarvis")
   → enregistrement jusqu'au silence (RMS) → WAV
   → STT Server (Whisper) → texte transcrit
   → command_classifier (ADD / QUERY / UNKNOWN)
-      ADD   → strip préfixe → /memory/add  → TemporalService → Qdrant (jarvis_for_home)
-      QUERY → /memory/query → TemporalService → Qdrant search → LLM → réponse loggée
+      ADD   → strip préfixe → /memory/add  → TemporalService → Qdrant (jarvis_for_home) → TTS "C'est noté."
+      QUERY → /memory/query → TemporalService → Qdrant search → LLM → TTS réponse vocale
 ```
 
 **Mémoire Q&A :** Question → TemporalService (extraction date) → embedding → recherche Qdrant `jarvis_for_home` (filtre eventDate auto) → contexte + prompt français → LLM → `{ answer, sources, topK, temporalContext? }`

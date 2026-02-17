@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import type { RagPayload } from '../rag/rag.types';
+import type { MemoryPayload } from '../memory/memory.types';
 
 @Injectable()
 export class VectorstoreService {
@@ -104,7 +105,7 @@ export class VectorstoreService {
   }
 
   async upsertMemory(
-    points: { id: string; vector: number[]; payload: RagPayload }[],
+    points: { id: string; vector: number[]; payload: MemoryPayload }[],
   ): Promise<void> {
     await this.client.upsert(this.memoryCollection, {
       wait: true,

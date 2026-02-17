@@ -32,3 +32,6 @@ jarvis/uploads/
 
 # Logs
 *.log
+
+# Piper TTS models
+wake-listener/models/

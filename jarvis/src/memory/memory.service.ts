@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { OllamaService } from '../ollama/ollama.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
 import { TemporalService } from '../temporal/temporal.service';
-import type { RagPayload } from '../rag/rag.types';
+import type { MemoryPayload } from './memory.types';
 
 @Injectable()
 export class MemoryService {
@@ -39,12 +39,11 @@ export class MemoryService {
           vector,
           payload: {
             source,
-            chunkIndex: 0,
             text,
             addedAt,
             contextType,
             ...(eventDate !== undefined ? { eventDate } : {}),
-          } satisfies RagPayload,
+          } satisfies MemoryPayload,
         },
       ]);
 
@@ -76,7 +75,7 @@ export class MemoryService {
 
       return {
         results: hits.map((h) => {
-          const p = h.payload as RagPayload;
+          const p = h.payload as MemoryPayload;
           return {
             text: p.text,
             source: p.source,

@@ -19,6 +19,7 @@ from config import load_config
 from jarvis_client import JarvisClient
 from recorder import record_until_silence
 from stt_client import SttClient
+from tts_client import TtsClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,7 +36,9 @@ def shutdown(sig, frame):
     running = False
 
 
-def _route_command(text: str, jarvis_client: JarvisClient) -> None:
+def _route_command(
+    text: str, jarvis_client: JarvisClient, tts_client: TtsClient
+) -> None:
     """
     Classifie la transcription et route vers le bon endpoint de la mémoire.
 
@@ -54,20 +57,25 @@ def _route_command(text: str, jarvis_client: JarvisClient) -> None:
                 result.get("eventDate", "—"),
                 result.get("expression", "—"),
             )
+            tts_client.speak("C'est noté.")
         else:
             logger.warning("L'ajout en mémoire a échoué (backend injoignable ou erreur).")
+            tts_client.speak("Désolé, je n'ai pas pu enregistrer ça.")
 
     elif command_type == CommandType.QUERY:
         logger.info("Commande QUERY détectée. Question: %s", content)
         result = jarvis_client.query_memory(content)
         if result:
+            answer = result.get("answer", "")
             logger.info(
                 "RÉPONSE JARVIS: %s  [contexte temporel: %s]",
-                result.get("answer", ""),
+                answer,
                 result.get("temporalContext", "aucun"),
             )
+            tts_client.speak(answer)
         else:
             logger.warning("La requête mémoire a échoué (backend injoignable ou erreur).")
+            tts_client.speak("Désolé, je n'ai pas pu répondre.")
 
     else:
         logger.info("Commande non reconnue (UNKNOWN). Texte ignoré: %s", text)
@@ -96,6 +104,7 @@ def main():
 
     stt_client = SttClient(config)
     jarvis_client = JarvisClient(config)
+    tts_client = TtsClient(config)
 
     logger.info(
         "Ecoute du wake word '%s' en cours... (Ctrl+C pour arreter)",
@@ -132,7 +141,7 @@ def main():
 
                     if text:
                         logger.info("TRANSCRIPTION: %s", text)
-                        _route_command(text, jarvis_client)
+                        _route_command(text, jarvis_client, tts_client)
                     else:
                         logger.info("Aucune parole detectee ou transcription vide.")
 

@@ -27,6 +27,10 @@ class Config:
     # Jarvis Backend API
     jarvis_api_url: str = "http://127.0.0.1:3000"
 
+    # TTS (Piper)
+    tts_model: str = "fr_FR-gilles-low"
+    tts_enabled: bool = True
+
 
 def load_config() -> Config:
     return Config(
@@ -39,4 +43,6 @@ def load_config() -> Config:
         sample_rate=int(os.getenv("SAMPLE_RATE", "16000")),
         stt_server_url=os.getenv("STT_SERVER_URL", "http://127.0.0.1:8300"),
         jarvis_api_url=os.getenv("JARVIS_API_URL", "http://127.0.0.1:3000"),
+        tts_model=os.getenv("TTS_MODEL", "fr_FR-siwis-medium"),
+        tts_enabled=os.getenv("TTS_ENABLED", "true").lower() in ("true", "1", "yes"),
     )

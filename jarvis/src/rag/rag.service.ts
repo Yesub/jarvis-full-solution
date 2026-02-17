@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { OllamaService } from '../ollama/ollama.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
 import type { RagPayload } from './rag.types';
+import type { MemoryPayload } from '../memory/memory.types';
 
 @Injectable()
 export class RagService {
@@ -112,12 +113,11 @@ export class RagService {
           vector: vectors[j],
           payload: {
             source,
-            chunkIndex: i + j,
             text: chunkText,
             addedAt,
             contextType,
             ...(eventDate !== undefined ? { eventDate } : {}),
-          } satisfies RagPayload,
+          } satisfies MemoryPayload,
         }));
 
         await this.vs.upsertMemory(points);
