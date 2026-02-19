@@ -5,10 +5,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OllamaService } from '../ollama/ollama.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
 import { TemporalService } from '../temporal/temporal.service';
 import type { MemoryPayload } from './memory.types';
+import {
+  JARVIS_EVENTS,
+  type MemoryAddedEvent,
+  type MemoryQueriedEvent,
+  type MemorySearchedEvent,
+} from '../events/jarvis.events';
 
 @Injectable()
 export class MemoryService {
@@ -20,6 +27,7 @@ export class MemoryService {
     private readonly ollama: OllamaService,
     private readonly vs: VectorstoreService,
     private readonly temporal: TemporalService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     this.defaultTopK = Number(this.config.get('RAG_TOP_K') ?? 5);
   }
@@ -33,9 +41,10 @@ export class MemoryService {
       await this.vs.ensureMemoryCollection(vector.length);
 
       const addedAt = new Date().toISOString();
+      const memoryId = uuidv4();
       await this.vs.upsertMemory([
         {
-          id: uuidv4(),
+          id: memoryId,
           vector,
           payload: {
             source,
@@ -46,6 +55,13 @@ export class MemoryService {
           } satisfies MemoryPayload,
         },
       ]);
+
+      this.eventEmitter.emit(JARVIS_EVENTS.MEMORY_ADDED, {
+        memoryId,
+        text,
+        source,
+        ...(eventDate !== undefined ? { eventDate } : {}),
+      } satisfies MemoryAddedEvent);
 
       return {
         source,
@@ -73,20 +89,25 @@ export class MemoryService {
       const [queryVector] = await this.ollama.embed([query]);
       const hits = await this.vs.searchMemory(queryVector, k, dateFilter);
 
-      return {
-        results: hits.map((h) => {
-          const p = h.payload as MemoryPayload;
-          return {
-            text: p.text,
-            source: p.source,
-            score: h.score,
-            addedAt: p.addedAt,
-            eventDate: p.eventDate,
-            contextType: p.contextType,
-          };
-        }),
+      const results = hits.map((h) => {
+        const p = h.payload as MemoryPayload;
+        return {
+          text: p.text,
+          source: p.source,
+          score: h.score,
+          addedAt: p.addedAt,
+          eventDate: p.eventDate,
+          contextType: p.contextType,
+        };
+      });
+
+      this.eventEmitter.emit(JARVIS_EVENTS.MEMORY_SEARCHED, {
+        query,
+        resultCount: results.length,
         topK: k,
-      };
+      } satisfies MemorySearchedEvent);
+
+      return { results, topK: k };
     } catch (error) {
       this.logger.error('Recherche mémoire échouée', error);
       throw new InternalServerErrorException(
@@ -148,6 +169,13 @@ export class MemoryService {
 
       // 5. Générer la réponse LLM (non-streaming)
       const answer = await this.ollama.generate(prompt, system);
+
+      this.eventEmitter.emit(JARVIS_EVENTS.MEMORY_QUERIED, {
+        question: q,
+        answer,
+        sourceIds: sources,
+        topK: results.length,
+      } satisfies MemoryQueriedEvent);
 
       return {
         answer,
