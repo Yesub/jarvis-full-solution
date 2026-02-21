@@ -1,7 +1,13 @@
 """Classification des commandes vocales Jarvis en add / query / unknown."""
 
+import logging
 import re
 from enum import Enum
+from typing import Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
 
 
 class CommandType(Enum):
@@ -39,9 +45,59 @@ _QUERY_PATTERNS = [
 ]
 
 
-def classify(text: str) -> tuple[CommandType, str]:
+def _classify_with_llm(
+    text: str, jarvis_api_url: str
+) -> "tuple[CommandType, str] | None":
+    """
+    Tente une classification via POST /agent/classify sur le backend NestJS.
+
+    Retourne (CommandType, contenu) si la réponse est valide, None sinon.
+    Le endpoint /agent/classify sera disponible à partir de la Phase 2.2.
+    """
+    url = f"{jarvis_api_url.rstrip('/')}/agent/classify"
+    try:
+        resp = requests.post(
+            url,
+            json={"text": text, "source": "wake_listener"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        intent_raw = data.get("intent", "").upper()
+        content = data.get("content", text)
+
+        if intent_raw == "ADD":
+            return CommandType.ADD, content
+        elif intent_raw == "QUERY":
+            return CommandType.QUERY, content
+        else:
+            return CommandType.UNKNOWN, content
+
+    except requests.ConnectionError:
+        # Expected during Phase 2.1 — endpoint does not yet exist
+        logger.debug(
+            "Backend /agent/classify non disponible — fallback regex."
+        )
+        return None
+    except requests.HTTPError as e:
+        logger.warning("Erreur HTTP /agent/classify: %s — fallback regex.", e)
+        return None
+    except Exception:
+        logger.exception(
+            "Erreur inattendue lors de la classification LLM — fallback regex."
+        )
+        return None
+
+
+def classify(
+    text: str, jarvis_api_url: Optional[str] = None
+) -> tuple[CommandType, str]:
     """
     Classifie une transcription vocale Jarvis.
+
+    Si jarvis_api_url est fourni, tente d'abord la classification via le backend
+    NestJS (/agent/classify). En cas d'échec, utilise les patterns regex locaux.
 
     Retourne (CommandType, contenu):
     - ADD   : contenu = texte sans le préfixe de commande
@@ -49,6 +105,14 @@ def classify(text: str) -> tuple[CommandType, str]:
     - UNKNOWN: contenu = texte complet
     """
     normalized = text.strip()
+
+    # Tenter la classification LLM si l'URL backend est disponible
+    if jarvis_api_url:
+        llm_result = _classify_with_llm(normalized, jarvis_api_url)
+        if llm_result is not None:
+            return llm_result
+
+    # Fallback regex — miroir de IntentEngine.classifyWithRegex (TypeScript)
 
     # Tester les patterns d'ajout (ancrage en début de phrase)
     for pattern in _ADD_PATTERNS:

@@ -37,7 +37,10 @@ def shutdown(sig, frame):
 
 
 def _route_command(
-    text: str, jarvis_client: JarvisClient, tts_client: TtsClient
+    text: str,
+    jarvis_client: JarvisClient,
+    tts_client: TtsClient,
+    jarvis_api_url: str,
 ) -> None:
     """
     Classifie la transcription et route vers le bon endpoint de la mémoire.
@@ -46,7 +49,7 @@ def _route_command(
     - QUERY → POST /memory/query (interrogation avec réponse LLM)
     - UNKNOWN → log simple, aucun appel backend
     """
-    command_type, content = classify(text)
+    command_type, content = classify(text, jarvis_api_url=jarvis_api_url)
 
     if command_type == CommandType.ADD:
         logger.info("Commande ADD détectée. Contenu à mémoriser: %s", content)
@@ -141,7 +144,7 @@ def main():
 
                     if text:
                         logger.info("TRANSCRIPTION: %s", text)
-                        _route_command(text, jarvis_client, tts_client)
+                        _route_command(text, jarvis_client, tts_client, config.jarvis_api_url)
                     else:
                         logger.info("Aucune parole detectee ou transcription vide.")
 

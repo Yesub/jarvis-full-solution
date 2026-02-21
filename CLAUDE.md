@@ -40,7 +40,8 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 | STT | `POST /stt/transcribe` (max 25 MB) | Proxy vers le serveur Python Whisper (fichier temp supprimé après transcription) |
 | HealthController | `GET /health` | Check de santé (controller standalone dans AppModule, pas de module dédié) |
 | ConfigModule | (global) | Chargement `.env` via `@nestjs/config` |
-| Ollama | (service interne) | Client Ollama `/api/embed` et `/api/generate` |
+| Ollama | (service interne) | Client Ollama multi-modèle : `embed()`, `generate()`, `generateWith(size)` avec routage small/medium/large |
+| Agent | `POST /agent/classify` (Phase 2.2) | Intent engine (`src/agent/intent/`) + types partagés (`src/agent/agent.types.ts`). `IntentEngine` créé en Phase 2.1, module non encore enregistré dans AppModule |
 | Vectorstore | (service interne) | Client Qdrant, gère deux collections : `domainknowledge` (documents) et `jarvis_for_home` (mémoire) |
 | Temporal | (service interne) | Extraction d'expressions temporelles françaises via chrono-node (`chrono.fr.parse`) |
 
@@ -51,16 +52,71 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 - **MemoryService** : coordonne Ollama (embeddings + génération), VectorstoreService (collection `jarvis_for_home`) et TemporalService
   - `add(text, source?, contextType?)` : extrait la date d'événement via TemporalService, embed le texte, stocke dans Qdrant avec `addedAt` et `eventDate` optionnel
   - `search(query, topK?, dateFilter?)` : recherche sémantique avec filtre de plage de dates optionnel (`eventDate` ou `addedAt`)
-  - `query(question, topK?)` : Q&A complet — parse le contexte temporel, filtre auto sur `eventDate` du même jour, génère une réponse LLM en français. Retourne `{ answer, sources, topK, temporalContext? }`
+  - `query(question, topK?)` : Q&A complet — utilise `parseInterval()` en priorité pour les plages de dates (ex. "la semaine dernière"), sinon `parse()` étendu au jour entier ; filtre auto sur `eventDate`, génère une réponse LLM en français. Retourne `{ answer, sources, topK, temporalContext? }`
 - **DTOs** : `MemoryAddDto`, `MemorySearchDto` (avec `DateFilterDto` imbriqué), `MemoryQueryDto`
+- **Types** : `MemoryPayload` défini dans `src/memory/memory.types.ts` — distinct de `RagPayload` (`src/rag/rag.types.ts`) depuis la Phase 1.1
+
+#### Event Bus (`src/memory/memory.events.listener.ts`)
+
+NestJS EventEmitter2 configuré avec `wildcard: true` dans AppModule. Les événements mémoire sont émis par `MemoryService` et consommés par `MemoryEventsListener` :
+
+| Événement | Données | Log |
+| --------- | ------- | --- |
+| `MEMORY_ADDED` | `{ id, source?, eventDate?, text }` | Confirmation de stockage avec aperçu du texte |
+| `MEMORY_SEARCHED` | `{ query, resultCount }` | Requête de recherche et nombre de résultats |
+| `MEMORY_QUERIED` | `{ question, topK, sourceIds }` | Question posée et IDs des sources utilisées |
+
+#### Module Ollama (`src/ollama/`)
+
+Routage multi-modèle via `resolveModel(size: 'small' | 'medium' | 'large')` :
+
+| Taille | Variable env | Modèle par défaut | Usage |
+| ------ | ------------ | ----------------- | ----- |
+| `small` | `OLLAMA_LLM_SMALL_MODEL` | `qwen3:4b` | Classification, intention, tâches légères |
+| `medium` | `OLLAMA_LLM_MODEL` | `mistral:latest` | Génération mémoire, résumés |
+| `large` | `OLLAMA_LLM_LARGE_MODEL` | `gpt-oss:20b` | RAG, raisonnement complexe |
+
+Méthodes disponibles : `generate(prompt)` / `generateStream(prompt)` (modèle medium par défaut), `generateWith(size, prompt)` / `generateStreamWith(size, prompt)` (taille explicite).
+
+#### Module Agent (`src/agent/`)
+
+Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine). Le module n'est pas encore enregistré dans AppModule (activation prévue Phase 2.2).
+
+**Types partagés** (`src/agent/agent.types.ts`) :
+
+- `AgentContext` — session, historique, intent actif, confirmations en attente, contexte temporel
+- `ConversationMessage` — rôle, contenu, timestamp, intent + confiance
+- `PendingConfirmation` — paramètres d'action avec TTL (expiry ISO 8601)
+- `IdentityProfile` — nom, rôle, projets, priorités, préférences utilisateur
+- `AgentProcessDto` — DTO d'entrée : `sessionId`, `text`, `source`
+- `AgentResponse` — intent, confiance, réponse, sources, actions, `hallucinationWarning?`
+- `AgentAction` — type, description, statut (`executed` | `pending_confirmation` | `failed`)
+
+**Intent Engine** (`src/agent/intent/`) — implémenté en Phase 2.1 :
+
+- `IntentEngine` (`intent.engine.ts`) : classification dual-path LLM-first → regex fallback
+  - `classify(text)` → `IntentResult` — méthode principale, ne lève jamais d'exception
+  - `classifyWithLLM(text)` → appelle `OllamaService.generateWith('small', ...)` avec `qwen3:4b` ; extrait le JSON en gérant les balises `<think>` (qwen3) et les blocs ` ```json ` ; retourne `null` si Ollama indisponible
+  - `classifyWithRegex(text)` → miroir synchrone des patterns de `command_classifier.py`
+- `IntentType` (`intent.types.ts`) : enum `ADD | QUERY | UNKNOWN`
+- `IntentResult` : `{ intent, confidence: number, content: string, entities: { dateExpression? }, source: 'llm'|'regex' }`
+- `CLASSIFICATION_SYSTEM_PROMPT` (`classification-prompt.ts`) : prompt système en français pour qwen3:4b ; impose un JSON strict sans prose ni balises markdown
 
 #### Module Temporal (`src/temporal/`)
 
 - **TemporalService** : parse les expressions de date/heure en français (ex. "ce soir à 20h", "demain", "vendredi prochain")
   - `parse(text, referenceDate?)` → `TemporalResult | null` (première expression)
   - `parseAll(text, referenceDate?)` → `TemporalResult[]` (toutes les expressions)
+  - `parseInterval(text, referenceDate?)` → `TemporalInterval | null` — extrait une plage de dates (ex. "la semaine dernière", "entre lundi et mercredi") ; pour une date unique, étend au jour entier (00:00–23:59:59.999)
+  - `detectRecurrence(text)` → `RecurrencePattern | null` — détecte les patterns récurrents via regex (ex. "tous les mardis" → `{ frequency: 'weekly', dayOfWeek: 2 }`, "chaque jour" → `{ frequency: 'daily' }`)
+  - `detectDirection(text)` → `TemporalDirection` — détermine l'orientation temporelle (past / future / present / unknown) via indicateurs français (ex. "hier" → `'past'`, "demain" → `'future'`)
+
+- **Types** (`src/temporal/temporal.types.ts`) :
   - `TemporalResult` : `{ expression: string, resolvedDate: string }` (ISO 8601 UTC)
-  - Option `forwardDate: true` pour résoudre les ambiguïtés vers le futur
+  - `TemporalInterval` : `{ expression: string, start: string, end: string }` (ISO 8601 UTC)
+  - `RecurrencePattern` : `{ expression: string, frequency: 'daily'|'weekly'|'monthly'|'yearly', dayOfWeek?: number, dayOfMonth?: number, time?: string }`
+  - `TemporalDirection` : `'past' | 'future' | 'present' | 'unknown'`
+  - Option `forwardDate: true` dans `parse()`/`parseAll()` pour résoudre les ambiguïtés vers le futur
 
 #### Stratégie Qdrant dual-collection
 
@@ -122,13 +178,15 @@ Point d'entrée : `wake_listener.py`
 | `config.py` | Configuration via variables d'environnement (dataclass), inclut `JARVIS_API_URL` et config TTS |
 | `recorder.py` | Enregistrement audio post-wake avec détection de silence par RMS |
 | `stt_client.py` | Client HTTP pour envoi audio au serveur STT (`POST /transcribe`) |
-| `command_classifier.py` | Classifie la transcription en `ADD` / `QUERY` / `UNKNOWN` via regex français |
+| `command_classifier.py` | Classifie la transcription en `ADD` / `QUERY` / `UNKNOWN` via LLM (backend `/agent/classify`) avec fallback regex |
 | `jarvis_client.py` | Client HTTP pour le backend NestJS (`/memory/add`, `/memory/query`) |
 | `tts_client.py` | Synthèse vocale locale via Piper TTS (modèle `fr_FR-siwis-medium`, auto-téléchargé dans `models/`) |
 
 **Stack :** Python, OpenWakeWord, PyAudio, NumPy, requests, python-dotenv, piper-tts, sounddevice
 
 #### Classification des commandes vocales (`command_classifier.py`)
+
+Dual-path depuis Phase 2.1 : tente d'abord le backend LLM (`POST /agent/classify` via `_classify_with_llm()`), retombe sur les regex si `ConnectionError` (endpoint non encore disponible jusqu'en Phase 2.2). `wake_listener.py` passe `config.jarvis_api_url` à `_route_command()` qui le fournit à `classify()`.
 
 | Type | Patterns déclencheurs (exemples) | Action |
 | ---- | --------------------------------- | ------ |
@@ -153,7 +211,9 @@ CORS_ORIGINS=http://localhost:4200
 
 # Ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_LLM_MODEL=gpt-oss:20b
+OLLAMA_LLM_SMALL_MODEL=qwen3:4b
+OLLAMA_LLM_MODEL=mistral:latest
+OLLAMA_LLM_LARGE_MODEL=gpt-oss:20b
 OLLAMA_EMBED_MODEL=qwen3-embedding:8b
 
 # Qdrant
@@ -255,3 +315,6 @@ Microphone (PyAudio) → OpenWakeWord ("Hey Jarvis")
 - Prompts système en français
 - Mémoire conversationnelle séparée des documents RAG (deux collections Qdrant distinctes)
 - Parsing temporel via chrono-node français (`forwardDate: true`)
+- Types de payload distincts : `RagPayload` (`src/rag/rag.types.ts`) pour les documents, `MemoryPayload` (`src/memory/memory.types.ts`) pour la mémoire
+- Routage LLM par taille (small/medium/large) via `OllamaService.resolveModel()` — jamais de nom de modèle en dur dans les services métier
+- Événements mémoire via EventEmitter2 (`MEMORY_ADDED`, `MEMORY_SEARCHED`, `MEMORY_QUERIED`) — les listeners ne doivent pas bloquer le flux principal

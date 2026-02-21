@@ -119,35 +119,48 @@ export class MemoryService {
   async query(q: string, topK?: number) {
     try {
       // 1. Détecter le contexte temporel dans la question
-      const temporal = this.temporal.parse(q);
-
-      // 2. Construire un filtre de date automatique (eventDate, même journée)
       let dateFilter:
         | { field: 'eventDate' | 'addedAt'; gte?: string; lte?: string }
         | undefined;
-      if (temporal?.resolvedDate) {
-        const d = new Date(temporal.resolvedDate);
-        const gte = new Date(
-          d.getFullYear(),
-          d.getMonth(),
-          d.getDate(),
-        ).toISOString();
-        const lte = new Date(
-          d.getFullYear(),
-          d.getMonth(),
-          d.getDate(),
-          23,
-          59,
-          59,
-          999,
-        ).toISOString();
-        dateFilter = { field: 'eventDate', gte, lte };
+      let temporalExpression: string | undefined;
+
+      // Priorité à l'intervalle (semaine, plage de dates)
+      const interval = this.temporal.parseInterval(q);
+      if (interval) {
+        dateFilter = {
+          field: 'eventDate',
+          gte: interval.start,
+          lte: interval.end,
+        };
+        temporalExpression = interval.expression;
+      } else {
+        // Fallback : date unique → filtre sur la journée entière
+        const temporal = this.temporal.parse(q);
+        if (temporal?.resolvedDate) {
+          const d = new Date(temporal.resolvedDate);
+          const gte = new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate(),
+          ).toISOString();
+          const lte = new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate(),
+            23,
+            59,
+            59,
+            999,
+          ).toISOString();
+          dateFilter = { field: 'eventDate', gte, lte };
+          temporalExpression = temporal.expression;
+        }
       }
 
-      // 3. Chercher les souvenirs pertinents
+      // 2. Chercher les souvenirs pertinents
       const { results } = await this.search(q, topK, dateFilter);
 
-      // 4. Formater le contexte pour le LLM
+      // 3. Formater le contexte pour le LLM
       const contexts = results
         .map(
           (r, i) =>
@@ -167,7 +180,7 @@ export class MemoryService {
           ? `Informations mémorisées:\n${contexts}\n\nQuestion:\n${q}\n\nRéponse:`
           : `Question:\n${q}\n\nAucune information mémorisée pertinente n'est disponible. Réponse:`;
 
-      // 5. Générer la réponse LLM (non-streaming)
+      // 4. Générer la réponse LLM (non-streaming)
       const answer = await this.ollama.generate(prompt, system);
 
       this.eventEmitter.emit(JARVIS_EVENTS.MEMORY_QUERIED, {
@@ -181,7 +194,7 @@ export class MemoryService {
         answer,
         sources,
         topK: results.length,
-        ...(temporal ? { temporalContext: temporal.expression } : {}),
+        ...(temporalExpression ? { temporalContext: temporalExpression } : {}),
       };
     } catch (error) {
       this.logger.error(`Requête mémoire échouée pour "${q}"`, error);
