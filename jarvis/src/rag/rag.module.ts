@@ -9,5 +9,6 @@ import { RagController } from './rag.controller';
   imports: [OllamaModule, VectorstoreModule, TemporalModule],
   providers: [RagService],
   controllers: [RagController],
+  exports: [RagService],
 })
 export class RagModule {}

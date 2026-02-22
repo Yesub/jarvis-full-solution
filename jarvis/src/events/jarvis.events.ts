@@ -37,8 +37,9 @@ export interface MemorySearchedEvent {
 
 export interface IntentClassifiedEvent {
   rawText: string;
-  intent: 'ADD' | 'QUERY' | 'UNKNOWN';
-  confidence?: number;
+  intent: string; // IntentType value (e.g. 'memory_add', 'memory_query', ...)
+  confidence: number;
+  sessionId?: string;
 }
 
 export interface ActionTriggeredEvent {

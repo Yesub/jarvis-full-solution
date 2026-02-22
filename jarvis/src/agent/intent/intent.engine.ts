@@ -43,13 +43,13 @@ export class IntentEngine {
   async classify(text: string): Promise<IntentResult> {
     const normalized = text.trim();
     if (!normalized) {
-      return this.unknownResult(normalized, 1.0, 'regex');
+      return this.unknownResult(normalized, 1.0);
     }
 
     try {
       const result = await this.classifyWithLLM(normalized);
       this.logger.debug(
-        `LLM classified "${normalized.slice(0, 60)}" → ${result.intent} (${result.confidence})`,
+        `LLM classified "${normalized.slice(0, 60)}" → ${result.primary} (${result.confidence})`,
       );
       return result;
     } catch (error) {
@@ -85,14 +85,14 @@ export class IntentEngine {
     for (const pattern of IntentEngine.ADD_PATTERNS) {
       const match = pattern.exec(normalized);
       if (match) {
-        const content = normalized.slice(match[0].length).trim();
-        if (content) {
+        const extractedContent = normalized.slice(match[0].length).trim();
+        if (extractedContent) {
           return {
-            intent: IntentType.ADD,
+            primary: IntentType.MEMORY_ADD,
             confidence: 1.0,
-            content,
+            extractedContent,
             entities: {},
-            source: 'regex',
+            priority: 'normal',
           };
         }
       }
@@ -101,16 +101,16 @@ export class IntentEngine {
     for (const pattern of IntentEngine.QUERY_PATTERNS) {
       if (pattern.test(normalized)) {
         return {
-          intent: IntentType.QUERY,
+          primary: IntentType.MEMORY_QUERY,
           confidence: 1.0,
-          content: normalized,
+          extractedContent: normalized,
           entities: {},
-          source: 'regex',
+          priority: 'normal',
         };
       }
     }
 
-    return this.unknownResult(normalized, 1.0, 'regex');
+    return this.unknownResult(normalized, 1.0);
   }
 
   /**
@@ -137,7 +137,6 @@ export class IntentEngine {
     }
 
     // Step 3: Extract the first JSON object span using indexOf/lastIndexOf
-    // lastIndexOf for '}' handles nested objects without over-matching
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     if (start !== -1 && end !== -1 && end > start) {
@@ -164,14 +163,9 @@ export class IntentEngine {
     json: Record<string, unknown>,
     originalText: string,
   ): IntentResult {
-    const rawIntent =
-      typeof json['intent'] === 'string' ? json['intent'].toUpperCase() : '';
-    const intent: IntentType =
-      rawIntent === 'ADD'
-        ? IntentType.ADD
-        : rawIntent === 'QUERY'
-          ? IntentType.QUERY
-          : IntentType.UNKNOWN;
+    const rawPrimary =
+      typeof json['primary'] === 'string' ? json['primary'].toLowerCase() : '';
+    const primary: IntentType = this.resolveIntentType(rawPrimary);
 
     const rawConf = json['confidence'];
     const confidence: number =
@@ -179,32 +173,88 @@ export class IntentEngine {
         ? rawConf
         : 0.5;
 
-    const rawContent = json['content'];
-    const content: string =
+    const rawContent = json['extractedContent'];
+    const extractedContent: string =
       typeof rawContent === 'string' && rawContent.trim().length > 0
         ? rawContent.trim()
         : originalText;
 
-    const rawDate = json['dateExpression'];
+    const rawEntities = json['entities'];
     const entities: ExtractedEntities =
-      typeof rawDate === 'string' && rawDate.trim().length > 0
-        ? { dateExpression: rawDate.trim() }
+      rawEntities && typeof rawEntities === 'object'
+        ? this.extractEntities(rawEntities as Record<string, unknown>)
         : {};
 
-    return { intent, confidence, content, entities, source: 'llm' };
+    const rawPriority = json['priority'];
+    const priority: 'high' | 'normal' | 'low' =
+      rawPriority === 'high' || rawPriority === 'low' ? rawPriority : 'normal';
+
+    const rawSecondary =
+      typeof json['secondary'] === 'string'
+        ? json['secondary'].toLowerCase()
+        : '';
+    const secondary = rawSecondary
+      ? this.resolveIntentType(rawSecondary)
+      : undefined;
+
+    return {
+      primary,
+      confidence,
+      extractedContent,
+      entities,
+      priority,
+      ...(secondary && secondary !== IntentType.UNKNOWN ? { secondary } : {}),
+    };
   }
 
-  private unknownResult(
-    text: string,
-    confidence: number,
-    source: 'llm' | 'regex',
-  ): IntentResult {
+  private resolveIntentType(value: string): IntentType {
+    const map: Record<string, IntentType> = {
+      memory_add: IntentType.MEMORY_ADD,
+      memory_query: IntentType.MEMORY_QUERY,
+      memory_update: IntentType.MEMORY_UPDATE,
+      memory_delete: IntentType.MEMORY_DELETE,
+      schedule_event: IntentType.SCHEDULE_EVENT,
+      query_schedule: IntentType.QUERY_SCHEDULE,
+      create_task: IntentType.CREATE_TASK,
+      query_tasks: IntentType.QUERY_TASKS,
+      complete_task: IntentType.COMPLETE_TASK,
+      rag_question: IntentType.RAG_QUESTION,
+      general_question: IntentType.GENERAL_QUESTION,
+      add_goal: IntentType.ADD_GOAL,
+      query_goals: IntentType.QUERY_GOALS,
+      execute_action: IntentType.EXECUTE_ACTION,
+      correction: IntentType.CORRECTION,
+      confirmation: IntentType.CONFIRMATION,
+      rejection: IntentType.REJECTION,
+      chitchat: IntentType.CHITCHAT,
+      unknown: IntentType.UNKNOWN,
+    };
+    return map[value] ?? IntentType.UNKNOWN;
+  }
+
+  private extractEntities(raw: Record<string, unknown>): ExtractedEntities {
+    const str = (v: unknown) =>
+      typeof v === 'string' && v.trim() && v.toLowerCase() !== 'null'
+        ? v.trim()
+        : undefined;
     return {
-      intent: IntentType.UNKNOWN,
+      person: str(raw['person']),
+      location: str(raw['location']),
+      time: str(raw['time']),
+      duration: str(raw['duration']),
+      object: str(raw['object']),
+      task: str(raw['task']),
+      frequency: str(raw['frequency']),
+    };
+  }
+
+  private unknownResult(text: string, confidence: number): IntentResult {
+    return {
+      primary: IntentType.UNKNOWN,
       confidence,
-      content: text,
+      extractedContent: text,
       entities: {},
-      source,
+      priority: 'low',
     };
   }
 }

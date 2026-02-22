@@ -10,6 +10,7 @@ import { RagModule } from './rag/rag.module';
 import { LlmModule } from './llm/llm.module';
 import { SttModule } from './stt/stt.module';
 import { MemoryModule } from './memory/memory.module';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { MemoryModule } from './memory/memory.module';
     LlmModule,
     SttModule,
     MemoryModule,
+    AgentModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
