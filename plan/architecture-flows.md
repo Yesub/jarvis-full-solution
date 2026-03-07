@@ -5,7 +5,8 @@
 ```mermaid
 graph TB
     subgraph UI["jarvis-ui (Angular 4200)"]
-        RagComp["RagComponent"]
+        RagComp["RagComponent\n/ (RAG + LLM)"]
+        AgentComp["AgentComponent\n/agent (conversation)"]
         ApiSvc["ApiService"]
         SpeechSvc["SpeechService"]
     end
@@ -16,7 +17,7 @@ graph TB
         MemCtrl["Memory Controller\n/memory/add\n/memory/search\n/memory/query"]
         LLMCtrl["LLM Controller\n/llm/ask\n/llm/ask/stream"]
         STTCtrl["STT Controller\n/stt/transcribe"]
-        AgentCtrl["Agent Controller\n/agent/process\n/agent/classify"]
+        AgentCtrl["Agent Controller\n/agent/process\n/agent/process/stream\n/agent/classify"]
 
         subgraph Services["Services internes"]
             OllamaSvc["OllamaService\nsmall / medium / large"]
@@ -47,9 +48,12 @@ graph TB
 
     RagComp --> ApiSvc
     RagComp --> SpeechSvc
+    AgentComp --> ApiSvc
+    AgentComp --> SpeechSvc
     ApiSvc -->|"HTTP / SSE"| RAGCtrl
     ApiSvc -->|"HTTP / SSE"| LLMCtrl
     ApiSvc -->|"HTTP"| STTCtrl
+    ApiSvc -->|"HTTP / SSE"| AgentCtrl
     SpeechSvc -->|"WebM audio"| STTCtrl
 
     RAGCtrl --> OllamaSvc
@@ -307,4 +311,41 @@ graph TD
     Route --> Services["MemoryService / RagService / LlmService"]
     Corr --> Route2["IntentRouterService.route()\ncorrection re-routée"]
     Conf --> Exec["executePendingAction()\nMEMORY_ADD / MEMORY_QUERY / RAG_QUESTION"]
+```
+
+---
+
+## 11. Flux Agent UI — Conversation depuis l'interface Angular (Phase 2.4)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant AgentComp as AgentComponent\n/agent
+    participant ApiSvc as ApiService
+    participant STTSrv as STT Server :8300
+    participant AgentCtrl as AgentController\n/agent/process/stream
+    participant AgentSvc as AgentService
+    participant Router as IntentRouterService
+
+    User->>AgentComp: saisie texte (ou micro)
+    alt entrée vocale
+        AgentComp->>STTSrv: POST /stt/transcribe (WebM)
+        STTSrv-->>AgentComp: texte transcrit
+    end
+    AgentComp->>ApiSvc: processAgentStream({ sessionId?, text })
+    ApiSvc->>AgentCtrl: POST /agent/process/stream (fetch SSE)
+    AgentCtrl->>AgentSvc: process(dto)
+    AgentSvc->>AgentSvc: classify + route
+    AgentSvc-->>AgentCtrl: AgentResponse
+    AgentCtrl-->>ApiSvc: SSE event: metadata\n{ sessionId, intent, confidence, sources }
+    ApiSvc-->>AgentComp: StreamEvent (_event: 'metadata')
+    AgentComp->>AgentComp: sessionId.set() + streamingIntent.set()
+    loop tokens mot par mot
+        AgentCtrl-->>ApiSvc: SSE data: { token }
+        ApiSvc-->>AgentComp: StreamEvent (token)
+        AgentComp->>AgentComp: streamingContent.update()
+    end
+    AgentCtrl-->>ApiSvc: SSE data: { done: true }
+    AgentComp->>AgentComp: finishStreaming() → messages.update()
+    AgentComp->>User: bulle assistant + badge intent/confidence
 ```

@@ -227,10 +227,11 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 
 ### Agent
 
-| Méthode | Route             | Description                                                                    |
-| ------- | ----------------- | ------------------------------------------------------------------------------ |
-| `POST`  | `/agent/process`  | Traitement complet : classification → routing → réponse contextuelle (session) |
-| `POST`  | `/agent/classify` | Classification d'intention seule (sans routing ni contexte de session)         |
+| Méthode | Route                    | Description                                                                    |
+| ------- | ------------------------ | ------------------------------------------------------------------------------ |
+| `POST`  | `/agent/process`         | Traitement complet : classification → routing → réponse contextuelle (session) |
+| `POST`  | `/agent/process/stream`  | Même pipeline, réponse streamée SSE — émet `event: metadata` puis tokens       |
+| `POST`  | `/agent/classify`        | Classification d'intention seule (sans routing ni contexte de session)         |
 
 ### Santé
 
@@ -304,7 +305,7 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 | Phase | Titre                                                                     | État                              |
 | ----- | ------------------------------------------------------------------------- | --------------------------------- |
 | **1** | Fondations — types, event bus, multi-LLM, agent context, temporal enrichi | ✅ 1.1–1.5 terminés               |
-| **2** | Intent engine & agent core — classification LLM, routing, meta-routing    | 🚧 2.1–2.3 terminés, 2.4 planifié |
+| **2** | Intent engine & agent core — classification LLM, routing, meta-routing, UI | ✅ 2.1–2.4 terminés               |
 | **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph                  | 🔜 planifié                       |
 | **4** | Actions & proactivité — action engine, goals, identity                    | 🔜 planifié                       |
 | **5** | Profondeur cognitive — context fusion, feedback, hallucination guard      | 🔜 planifié                       |
@@ -322,6 +323,7 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 - **2.1** — `IntentEngine` (`src/agent/intent/`) : classification dual-path LLM (qwen3:4b) → regex fallback ; `command_classifier.py` tente `POST /agent/classify` avant de tomber sur les regex
 - **2.2** — `AgentModule` enregistré dans `AppModule` ; `AgentController` (`POST /agent/process`, `/agent/classify`) ; `AgentService` (orchestration : classify → emit event → route → update context) ; `IntentRouterService` (routing de 18 `IntentType` vers `MemoryService` / `RagService` / `LlmService`, intents phase 4 graceful "not yet implemented") ; `AgentContextManager` (sessions TTL 30 min, historique 20 messages) ; `IntentType` étendu de 3 à 18 types ; `PENDING_ACTIONS`, `AgentResponse`, `ConversationMessage`, `PendingConfirmation` dans `src/agent/agent.types.ts`
 - **2.3** — Meta-routing dans `AgentService` : CORRECTION (re-classification du texte corrigé + re-routing via `IntentRouterService`, garde anti-récursion), CONFIRMATION (validation TTL + `executePendingAction()` pour MEMORY_ADD / MEMORY_QUERY / RAG_QUESTION), REJECTION (annulation action en attente + mise à jour historique)
+- **2.4** — Interface Angular Agent (`/agent`) : `AgentComponent` standalone avec historique de conversation (bulles user/assistant), badges intent+confidence colorés, streaming SSE via `/agent/process/stream`, micro intégré (`SpeechService`), gestion de `sessionId` cross-requêtes ; `AgentService` et `ApiService` étendus ; navigation toolbar avec onglets RAG/LLM et Agent
 
 ---
 

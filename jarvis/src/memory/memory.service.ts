@@ -158,6 +158,9 @@ export class MemoryService {
       }
 
       // 2. Chercher les souvenirs pertinents
+      this.logger.debug(
+        `Temporal expression classified "${temporalExpression}" → ${dateFilter?.field} between ${dateFilter?.gte} and ${dateFilter?.lte}`,
+      );
       const { results } = await this.search(q, topK, dateFilter);
 
       // 3. Formater le contexte pour le LLM

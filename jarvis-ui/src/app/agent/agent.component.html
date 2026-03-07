@@ -1,0 +1,105 @@
+<div class="agent-container">
+  @if (busy() && !streamingContent()) {
+    <mat-progress-bar mode="indeterminate" />
+  }
+
+  <!-- Messages -->
+  <div class="messages-area" #messagesArea>
+    @if (messages().length === 0) {
+      <div class="empty-state">
+        <mat-icon>smart_toy</mat-icon>
+        <p>Bonjour ! Je suis Jarvis. Comment puis-je vous aider ?</p>
+      </div>
+    }
+
+    @for (msg of messages(); track msg.timestamp) {
+      <div class="message-row" [class.user-row]="msg.role === 'user'">
+        <div class="message-bubble" [class.user-bubble]="msg.role === 'user'" [class.assistant-bubble]="msg.role === 'assistant'">
+          <div class="message-content">{{ msg.content }}</div>
+
+          @if (msg.role === 'assistant' && msg.intent) {
+            <div class="message-meta">
+              <span class="intent-badge" [class]="'confidence-' + confidenceColor(msg.confidence ?? 0)">
+                {{ msg.intent }}
+                @if (msg.confidence !== undefined) {
+                  <span class="confidence-pct">{{ (msg.confidence * 100).toFixed(0) }}%</span>
+                }
+              </span>
+            </div>
+          }
+
+          @if (msg.sources && msg.sources.length > 0) {
+            <div class="sources">
+              <span class="sources-label">Sources :</span>
+              @for (src of msg.sources; track src.text) {
+                <span class="source-chip">{{ src.text.slice(0, 60) }}…</span>
+              }
+            </div>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Streaming bubble -->
+    @if (streamingContent()) {
+      <div class="message-row">
+        <div class="message-bubble assistant-bubble streaming">
+          <div class="message-content">{{ streamingContent() }}</div>
+          @if (streamingIntent()) {
+            <div class="message-meta">
+              <span class="intent-badge" [class]="'confidence-' + confidenceColor(streamingConfidence() ?? 0)">
+                {{ streamingIntent() }}
+                @if (streamingConfidence() !== null) {
+                  <span class="confidence-pct">{{ ((streamingConfidence() ?? 0) * 100).toFixed(0) }}%</span>
+                }
+              </span>
+            </div>
+          }
+          <span class="typing-cursor">▌</span>
+        </div>
+      </div>
+    }
+  </div>
+
+  <!-- Input area -->
+  <div class="input-area">
+    <mat-form-field appearance="outline" class="input-field">
+      <textarea
+        matInput
+        rows="2"
+        placeholder="Écrivez votre message… (Entrée pour envoyer, Shift+Entrée pour nouvelle ligne)"
+        [ngModel]="inputText()"
+        (ngModelChange)="inputText.set($event)"
+        (keydown)="handleKeydown($event)"
+        [disabled]="busy()"
+      ></textarea>
+    </mat-form-field>
+
+    <div class="input-actions">
+      <button
+        mat-icon-button
+        [color]="recordingActive() ? 'warn' : ''"
+        [disabled]="transcribing() || busy()"
+        [class.recording-pulse]="recordingActive()"
+        (click)="toggleMic()"
+        [matTooltip]="recordingActive() ? 'Arrêter l\'enregistrement' : 'Dicter un message'"
+      >
+        <mat-icon>{{ recordingActive() ? 'stop_circle' : 'mic' }}</mat-icon>
+      </button>
+
+      @if (transcribing()) {
+        <span class="transcribing-label">Transcription…</span>
+      }
+
+      <button
+        mat-fab
+        color="primary"
+        [disabled]="!inputText().trim() || busy()"
+        (click)="send()"
+        matTooltip="Envoyer"
+      >
+        <mat-icon>send</mat-icon>
+      </button>
+    </div>
+  </div>
+</div>

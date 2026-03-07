@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../environments/environment';
 import { IngestResponse, LlmResponse, RagResponse, SttResponse } from './models/rag.models';
+import { AgentResponse } from './models/agent.models';
 
 export interface StreamEvent {
   _event?: string;
@@ -11,6 +12,10 @@ export interface StreamEvent {
   error?: string;
   sources?: string[];
   topK?: number;
+  // Agent metadata fields
+  sessionId?: string;
+  intent?: string;
+  confidence?: number;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -38,6 +43,14 @@ export class ApiService {
 
   askRagStream(question: string, topK = 5): Observable<StreamEvent> {
     return this.streamPost('/rag/ask/stream', { question, topK });
+  }
+
+  processAgent(dto: { sessionId?: string; text: string; source?: string }): Observable<AgentResponse> {
+    return this.http.post<AgentResponse>(`${this.baseUrl}/agent/process`, dto);
+  }
+
+  processAgentStream(dto: { sessionId?: string; text: string; source?: string }): Observable<StreamEvent> {
+    return this.streamPost('/agent/process/stream', dto);
   }
 
   transcribe(audioBlob: Blob): Observable<SttResponse> {

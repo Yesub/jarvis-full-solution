@@ -1,0 +1,8 @@
+.toolbar-spacer {
+  flex: 1;
+}
+
+.nav-active {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-radius: 4px;
+}

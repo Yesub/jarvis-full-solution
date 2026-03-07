@@ -157,20 +157,34 @@ Les index datetime sont créés automatiquement sur `addedAt` et `eventDate` dan
 
 Point d'entrée : `src/main.ts` (port 4200)
 
-Architecture **standalone components** (pas de NgModules). Route unique `''` avec lazy-loading de `RagComponent`.
+Architecture **standalone components** (pas de NgModules). Deux routes lazy-loaded : `''` → `RagComponent`, `'agent'` → `AgentComponent`. Navigation toolbar avec onglets "RAG / LLM" et "Agent" (`routerLink` + `routerLinkActive`).
 
-Page unique (`RagComponent`) avec 3 sections :
+**`RagComponent`** (`src/app/rag.component.ts`) — page RAG/LLM avec 3 sections :
 
 1. **Ingestion** — Upload de fichiers vers la base vectorielle
 2. **RAG** — Questions avec contexte documentaire (streaming SSE)
 3. **LLM** — Questions directes au LLM (streaming SSE)
 
+**`AgentComponent`** (`src/app/agent/agent.component.ts`) — interface de conversation agent (Phase 2.4) :
+
+- Historique de messages (bulles user à droite, assistant à gauche)
+- Badges intent + confidence colorés par niveau (vert ≥ 80%, orange ≥ 50%, rouge < 50%)
+- Streaming SSE via `POST /agent/process/stream` — event `metadata` puis tokens mot par mot
+- Fallback non-streaming (`POST /agent/process`) si le stream échoue
+- Gestion de `sessionId` cross-requêtes pour la continuité de session
+- Micro intégré (`SpeechService`) avec transcription STT → remplissage de l'input
+- Envoi sur Entrée, nouvelle ligne sur Shift+Entrée
+
 Chaque section supporte l'entrée vocale via microphone (WebM → STT).
 
-| Service         | Rôle                                                        |
-| --------------- | ----------------------------------------------------------- |
-| `ApiService`    | Appels HTTP et streaming SSE via Fetch API + ReadableStream |
-| `SpeechService` | Enregistrement audio via MediaRecorder (WebM)               |
+| Service         | Rôle                                                                                         |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `ApiService`    | Appels HTTP et streaming SSE via Fetch API + ReadableStream                                  |
+| `SpeechService` | Enregistrement audio via MediaRecorder (WebM)                                                |
+
+Méthodes `ApiService` pour l'agent : `processAgent(dto)` → `POST /agent/process`, `processAgentStream(dto)` → `POST /agent/process/stream`. `StreamEvent` étendu avec `sessionId?`, `intent?`, `confidence?` pour les events `metadata` de l'agent.
+
+**Modèles** (`src/app/models/`) : `rag.models.ts` (existant) + `agent.models.ts` (Phase 2.4) — `AgentMessage`, `AgentResponse`.
 
 Config : `src/environments/environment.ts` → `apiUrl: 'http://localhost:3000'`
 

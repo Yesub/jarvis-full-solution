@@ -67,7 +67,7 @@ export class IntentEngine {
   async classifyWithLLM(text: string): Promise<IntentResult> {
     const prompt = `Texte à classifier:\n${text}`;
     const raw = await this.ollama.generateWith(
-      'small',
+      'medium', // 'small',
       prompt,
       CLASSIFICATION_SYSTEM_PROMPT,
     );
