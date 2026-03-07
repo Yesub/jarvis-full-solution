@@ -49,8 +49,10 @@ Upload (PDF/TXT/MD) → LangChain parsing → chunking (1000 chars, overlap 150)
 #### RAG Q&A (streaming)
 
 ```text
-Question → embedding → recherche Qdrant top-5 → contexte + prompt
-  → LLM qwen3.5:9b (stream SSE) → réponse
+Question → embedding → recherche Qdrant top-5
+  mode vector : cosine similarity uniquement
+  mode hybrid : BM25 sparse (TokenizerService) + cosine → RRF fusion (Qdrant natif)
+  → contexte + prompt → LLM qwen3.5:9b (stream SSE) → réponse
 ```
 
 #### Wake Word → Mémoire
@@ -163,6 +165,7 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 - Ingestion de fichiers PDF, TXT et Markdown (jusqu'à 50 MB)
 - Chunking automatique (1000 caractères, overlap 150)
 - Recherche sémantique avec top-K configurable
+- **Recherche hybride BM25 + vecteurs** (Phase 3.2) : activation via `SEARCH_MODE=hybrid` ; combine similarité cosine (dense) et correspondance lexicale BM25 (sparse) via Reciprocal Rank Fusion natif Qdrant ; améliore la précision sur les noms propres et termes techniques
 - Réponses streamées (Server-Sent Events)
 
 ### Mémoire conversationnelle
@@ -266,6 +269,7 @@ QDRANT_MEMORY_COLLECTION=jarvis_for_home
 RAG_TOP_K=5
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=150
+SEARCH_MODE=vector   # 'vector' (défaut) ou 'hybrid' (BM25 + vecteurs)
 
 # STT
 STT_SERVER_URL=http://127.0.0.1:8300
@@ -307,7 +311,7 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 | ----- | ------------------------------------------------------------------------- | --------------------------------- |
 | **1** | Fondations — types, event bus, multi-LLM, agent context, temporal enrichi | ✅ 1.1–1.5 terminés               |
 | **2** | Intent engine & agent core — classification LLM, routing, meta-routing, UI | ✅ 2.1–2.4 terminés               |
-| **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph                  | 🚧 3.1 terminé                    |
+| **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph                  | 🚧 3.1–3.2 terminés               |
 | **4** | Actions & proactivité — action engine, goals, identity                    | 🔜 planifié                       |
 | **5** | Profondeur cognitive — context fusion, feedback, hallucination guard      | 🔜 planifié                       |
 
@@ -329,6 +333,7 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 ### Phase 3 — Détail des implémentations
 
 - **3.1** — Scoring d'importance mémoire : `MemoryScoringService` (`src/memory/memory-scoring.service.ts`) avec formule `0.3*recency + 0.3*access + 0.2*emotion + 0.2*future` ; `importance` et `accessCount: 0` stockés dans le payload Qdrant à chaque `add()` ; `search()` re-rank les résultats par `vectorScore × importance` et expose `importance`/`accessCount` dans la réponse ; `MemoryEventsListener` incrémente `accessCount` et recalcule `importance` de façon asynchrone (fire-and-forget) après chaque recherche via `retrieveMemoryPoints()` + `updateMemoryPayload()` ; anciens souvenirs sans score compatibles via `?? 0.3` / `?? 0`
+- **3.2** — RAG hybride BM25 + vecteurs : `TokenizerService` (`src/rag/tokenizer.service.ts`) tokenise le français (normalisation accents, stop words, hash 16-bit, TF normalisée) et produit des sparse vectors ; `VectorstoreService.ensureCollection()` ajoute le slot sparse `bm25` (modifier `idf`) via `updateCollection()` idempotent ; `upsert()` accepte `sparseVector?` optionnel et stocke avec vecteurs nommés `{ default, bm25 }` ; `searchHybrid()` appelle `client.query()` avec `prefetch` dense+sparse et `fusion: "rrf"` natif Qdrant ; `RagService.retrieveContext()` switche entre `search()` et `searchHybrid()` selon `SEARCH_MODE=vector|hybrid` (défaut `vector`, backward compatible)
 
 ---
 

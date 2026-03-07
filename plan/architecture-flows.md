@@ -105,8 +105,9 @@ sequenceDiagram
     LC-->>NestJS: chunks[]
     loop pour chaque chunk
         NestJS->>Ollama: POST /api/embed (qwen3-embedding:8b)
-        Ollama-->>NestJS: vecteur 4096 dims
-        NestJS->>Qdrant: upsert → domainknowledge\n{ source, chunkIndex, text }
+        Ollama-->>NestJS: vecteur dense 4096 dims
+        NestJS->>NestJS: TokenizerService.tokenize(chunk)\n→ sparse vector { indices, values }
+        NestJS->>Qdrant: upsert → domainknowledge\n{ default: dense, bm25: sparse }\n{ source, chunkIndex, text }
     end
     NestJS-->>UI: { chunksIngested, collection }
 ```
@@ -127,7 +128,12 @@ sequenceDiagram
     UI->>NestJS: POST /rag/ask/stream
     NestJS->>Ollama: embed(question) → qwen3-embedding:8b
     Ollama-->>NestJS: vecteur question
-    NestJS->>Qdrant: search domainknowledge (top-K=5)
+    alt SEARCH_MODE=vector (défaut)
+        NestJS->>Qdrant: search domainknowledge (cosine, top-K=5)
+    else SEARCH_MODE=hybrid
+        NestJS->>NestJS: TokenizerService.tokenize(question) → sparse
+        NestJS->>Qdrant: query domainknowledge\nprefetch [dense default, sparse bm25]\nfusion: rrf (top-K=5)
+    end
     Qdrant-->>NestJS: chunks pertinents + scores
     NestJS-->>UI: SSE event: metadata\n{ sources, topK }
     NestJS->>Ollama: generate(prompt+contexte) → large model\nqwen3.5:9b (stream)
@@ -255,11 +261,16 @@ graph LR
 ```mermaid
 graph TB
     subgraph Qdrant["Qdrant :6333"]
-        DC["domainknowledge\nRAG documents\n{ source, chunkIndex, text }"]
-        MEM["jarvis_for_home\nMémoire conversationnelle\n{ source, text, addedAt, contextType,\neventDate?, importance, accessCount }"]
+        DC["domainknowledge\nRAG documents\nvecteurs: default (dense) + bm25 (sparse)\n{ source, chunkIndex, text }"]
+        MEM["jarvis_for_home\nMémoire conversationnelle\nvecteurs: dense uniquement\n{ source, text, addedAt, contextType,\neventDate?, importance, accessCount }"]
     end
 
-    RAGSvc["RagService\nRagPayload"] -->|"upsert / search"| DC
+    Tokenizer["TokenizerService\n(Phase 3.2)\ntokenize → { indices, values }"]
+    RAGSvc["RagService"] -->|"ingest: upsert { default, bm25 }"| DC
+    RAGSvc -->|"query vector: search()"| DC
+    RAGSvc -->|"query hybrid: searchHybrid()\nprefetch dense+sparse / fusion rrf"| DC
+    RAGSvc --> Tokenizer
+
     MemSvc["MemoryService\nMemoryPayload"] -->|"upsert / search\nre-rank vectorScore×importance"| MEM
     MEM -->|"index datetime"| DateIdx["Index addedAt\nIndex eventDate"]
     Listener["MemoryEventsListener\n(Phase 3.1)"] -->|"setPayload(wait=false)\naccessCount++ / importance recalc"| MEM

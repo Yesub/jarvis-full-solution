@@ -11,6 +11,7 @@ import { extname } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { OllamaService } from '../ollama/ollama.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
+import { TokenizerService } from './tokenizer.service';
 import type { RagPayload } from './rag.types';
 import type { MemoryPayload } from '../memory/memory.types';
 
@@ -20,15 +21,18 @@ export class RagService {
   private readonly chunkSize: number;
   private readonly chunkOverlap: number;
   private readonly defaultTopK: number;
+  private readonly searchMode: string;
 
   constructor(
     private readonly config: ConfigService,
     private readonly ollama: OllamaService,
     private readonly vs: VectorstoreService,
+    private readonly tokenizer: TokenizerService,
   ) {
     this.chunkSize = Number(this.config.get('CHUNK_SIZE') ?? 1000);
     this.chunkOverlap = Number(this.config.get('CHUNK_OVERLAP') ?? 150);
     this.defaultTopK = Number(this.config.get('RAG_TOP_K') ?? 5);
+    this.searchMode = this.config.get('SEARCH_MODE') ?? 'vector';
   }
 
   private splitter() {
@@ -68,6 +72,7 @@ export class RagService {
         const points = batch.map((text, j) => ({
           id: uuidv4(),
           vector: vectors[j],
+          sparseVector: this.tokenizer.tokenize(text),
           payload: {
             source: originalName,
             chunkIndex: i + j,
@@ -131,6 +136,15 @@ export class RagService {
     }
   }
 
+  private async retrieveContext(question: string, k: number) {
+    const [qVec] = await this.ollama.embed([question]);
+    if (this.searchMode === 'hybrid') {
+      const sparseVec = this.tokenizer.tokenize(question);
+      return this.vs.searchHybrid(qVec, sparseVec, k);
+    }
+    return this.vs.search(qVec, k);
+  }
+
   async askStream(
     question: string,
     topK?: number,
@@ -140,8 +154,7 @@ export class RagService {
     tokenStream: AsyncGenerator<string>;
   }> {
     const k = topK ?? this.defaultTopK;
-    const [qVec] = await this.ollama.embed([question]);
-    const hits = await this.vs.search(qVec, k);
+    const hits = await this.retrieveContext(question, k);
 
     const contexts = (hits ?? [])
       .map((h, idx) => {
@@ -166,8 +179,7 @@ Si le contexte ne contient pas la réponse, dis-le explicitement.`;
 
   async ask(question: string, topK?: number) {
     const k = topK ?? this.defaultTopK;
-    const [qVec] = await this.ollama.embed([question]);
-    const hits = await this.vs.search(qVec, k);
+    const hits = await this.retrieveContext(question, k);
 
     const contexts = (hits ?? [])
       .map((h, idx) => {

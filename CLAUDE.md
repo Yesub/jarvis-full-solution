@@ -42,7 +42,7 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 | ConfigModule        | (global)                                                      | Chargement `.env` via `@nestjs/config`                                                                                                                                                                         |
 | Ollama              | (service interne)                                             | Client Ollama multi-modèle : `embed()`, `generate()`, `generateWith(size)` avec routage small/medium/large                                                                                                     |
 | Agent               | `POST /agent/process`, `POST /agent/classify`                 | Orchestration complète : classification → routing → réponse contextuelle. `AgentService` + `IntentRouterService` + `AgentContextManager`. Module enregistré dans AppModule (Phase 2.2)                         |
-| Vectorstore         | (service interne)                                             | Client Qdrant, gère deux collections : `domainknowledge` (documents) et `jarvis_for_home` (mémoire)                                                                                                            |
+| Vectorstore         | (service interne)                                             | Client Qdrant, gère deux collections : `domainknowledge` (documents, sparse BM25 Phase 3.2) et `jarvis_for_home` (mémoire)                                                                                      |
 | Temporal            | (service interne)                                             | Extraction d'expressions temporelles françaises via chrono-node (`chrono.fr.parse`)                                                                                                                            |
 
 **Stack :** NestJS 11, TypeScript, LangChain (PDFLoader, text splitting), Qdrant JS Client, chrono-node, class-validator, class-transformer
@@ -151,14 +151,29 @@ Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine), com
   - `TemporalDirection` : `'past' | 'future' | 'present' | 'unknown'`
   - Option `forwardDate: true` dans `parse()`/`parseAll()` pour résoudre les ambiguïtés vers le futur
 
+#### Module RAG (`src/rag/`) — Phase 3.2
+
+- **RagService** : ingestion (PDF/TXT/MD), Q&A avec contexte vectoriel
+  - `ingestFile()` : chunking → embed dense + sparse (TokenizerService) → upsert avec vecteurs nommés `{ default, bm25 }`
+  - `retrieveContext(question, k)` : méthode privée — switche entre `vs.search()` (mode `vector`) et `vs.searchHybrid()` (mode `hybrid`) selon `SEARCH_MODE`
+  - `ask()` / `askStream()` : délèguent à `retrieveContext()` pour la récupération de contexte
+- **TokenizerService** (`src/rag/tokenizer.service.ts`) — Phase 3.2 :
+  - `tokenize(text)` → `{ indices: number[], values: number[] }` : sparse vector BM25
+  - Normalise les accents (NFD), filtre stop words français, hash 16-bit par token, TF normalisée 0–1
+  - IDF délégué à Qdrant via `modifier: "idf"` sur le slot `bm25`
+
+**Variable d'environnement :** `SEARCH_MODE=vector` (défaut, backward compatible) | `hybrid` (active BM25 + RRF)
+
 #### Stratégie Qdrant dual-collection
 
-| Collection        | Usage                      | Champs payload                                                                              |
-| ----------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
-| `domainknowledge` | Documents RAG (PDF/TXT/MD) | `source`, `chunkIndex`, `text`                                                              |
-| `jarvis_for_home` | Mémoire conversationnelle  | `source`, `text`, `addedAt`, `contextType`, `eventDate?`, `importance`, `accessCount`       |
+| Collection        | Usage                      | Vecteurs                              | Champs payload                                                                         |
+| ----------------- | -------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
+| `domainknowledge` | Documents RAG (PDF/TXT/MD) | dense `default` + sparse `bm25` (3.2) | `source`, `chunkIndex`, `text`                                                         |
+| `jarvis_for_home` | Mémoire conversationnelle  | dense uniquement                      | `source`, `text`, `addedAt`, `contextType`, `eventDate?`, `importance`, `accessCount`  |
 
-Les index datetime sont créés automatiquement sur `addedAt` et `eventDate` dans `jarvis_for_home`. `importance` et `accessCount` sont mis à jour via `setPayload()` après chaque recherche (Phase 3.1). Méthodes `VectorstoreService` ajoutées : `retrieveMemoryPoints(ids[])` et `updateMemoryPayload(pointId, fields)` avec `wait: false` (best-effort).
+`domainknowledge` : slot sparse `bm25` ajouté via `updateCollection()` idempotent à chaque `ensureCollection()` (Phase 3.2). Nouveaux chunks upsertés avec vecteurs nommés `{ default: number[], bm25: SparseVector }` ; anciens chunks (dense-only) restent searchables en mode `vector`. `searchHybrid()` utilise `client.query()` avec `prefetch` [dense, sparse] + `query: { fusion: "rrf" }` natif Qdrant.
+
+`jarvis_for_home` : index datetime créés automatiquement sur `addedAt` et `eventDate`. `importance` et `accessCount` mis à jour via `setPayload()` après chaque recherche (Phase 3.1). Méthodes `VectorstoreService` : `retrieveMemoryPoints(ids[])`, `updateMemoryPayload(pointId, fields)` (`wait: false`), `searchHybrid(queryVector, sparseVector, limit)` (Phase 3.2, collection `domainknowledge` uniquement).
 
 ### jarvis-ui/ — Frontend Angular
 
