@@ -148,4 +148,23 @@ export class VectorstoreService {
       ...(filter !== undefined ? { filter } : {}),
     });
   }
+
+  async retrieveMemoryPoints(ids: string[]) {
+    return this.client.retrieve(this.memoryCollection, {
+      ids,
+      with_payload: true,
+      with_vector: false,
+    });
+  }
+
+  async updateMemoryPayload(
+    pointId: string,
+    fields: Partial<MemoryPayload>,
+  ): Promise<void> {
+    await this.client.setPayload(this.memoryCollection, {
+      payload: fields as Record<string, unknown>,
+      points: [pointId],
+      wait: false,
+    });
+  }
 }

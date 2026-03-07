@@ -239,10 +239,13 @@ graph LR
 graph LR
     MemSvc["MemoryService"]
     MemSvc -->|"emit MEMORY_ADDED"| EB["EventEmitter2\nwildcard: true"]
-    MemSvc -->|"emit MEMORY_SEARCHED"| EB
+    MemSvc -->|"emit MEMORY_SEARCHED\n{ resultIds[] }"| EB
     MemSvc -->|"emit MEMORY_QUERIED"| EB
     EB -->|"@OnEvent"| Listener["MemoryEventsListener\nmemory.events.listener.ts"]
     Listener -->|"log"| Logger["NestJS Logger\naperçu texte 60 chars"]
+    Listener -->|"MEMORY_SEARCHED\nretrieveMemoryPoints()"| VectorSvc["VectorstoreService"]
+    VectorSvc -->|"accessCount + 1\nimportance recalculé\nupdateMemoryPayload(wait=false)"| Qdrant["Qdrant jarvis_for_home"]
+    Listener -->|"recomputeImportance()"| ScoringService["MemoryScoringService\n0.3*recency + 0.3*access\n+ 0.2*emotion + 0.2*future"]
 ```
 
 ---
@@ -253,12 +256,13 @@ graph LR
 graph TB
     subgraph Qdrant["Qdrant :6333"]
         DC["domainknowledge\nRAG documents\n{ source, chunkIndex, text }"]
-        MEM["jarvis_for_home\nMémoire conversationnelle\n{ source, text, addedAt, contextType, eventDate? }"]
+        MEM["jarvis_for_home\nMémoire conversationnelle\n{ source, text, addedAt, contextType,\neventDate?, importance, accessCount }"]
     end
 
     RAGSvc["RagService\nRagPayload"] -->|"upsert / search"| DC
-    MemSvc["MemoryService\nMemoryPayload"] -->|"upsert / search"| MEM
+    MemSvc["MemoryService\nMemoryPayload"] -->|"upsert / search\nre-rank vectorScore×importance"| MEM
     MEM -->|"index datetime"| DateIdx["Index addedAt\nIndex eventDate"]
+    Listener["MemoryEventsListener\n(Phase 3.1)"] -->|"setPayload(wait=false)\naccessCount++ / importance recalc"| MEM
 ```
 
 ---

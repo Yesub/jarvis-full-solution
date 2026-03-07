@@ -49,22 +49,29 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 
 #### Module Memory (`src/memory/`)
 
-- **MemoryService** : coordonne Ollama (embeddings + génération), VectorstoreService (collection `jarvis_for_home`) et TemporalService
-  - `add(text, source?, contextType?)` : extrait la date d'événement via TemporalService, embed le texte, stocke dans Qdrant avec `addedAt` et `eventDate` optionnel
-  - `search(query, topK?, dateFilter?)` : recherche sémantique avec filtre de plage de dates optionnel (`eventDate` ou `addedAt`)
+- **MemoryService** : coordonne Ollama (embeddings + génération), VectorstoreService (collection `jarvis_for_home`), TemporalService et MemoryScoringService (Phase 3.1)
+  - `add(text, source?, contextType?)` : extrait la date d'événement via TemporalService, calcule `importance` via `MemoryScoringService.computeImportance()`, embed le texte, stocke dans Qdrant avec `addedAt`, `eventDate?`, `importance` et `accessCount: 0`
+  - `search(query, topK?, dateFilter?)` : recherche sémantique avec filtre de plage de dates optionnel (`eventDate` ou `addedAt`) ; re-rank les résultats par `vectorScore × importance` (fallback `0.3` pour anciens souvenirs) ; expose `importance` et `accessCount` dans chaque résultat
   - `query(question, topK?)` : Q&A complet — utilise `parseInterval()` en priorité pour les plages de dates (ex. "la semaine dernière"), sinon `parse()` étendu au jour entier ; filtre auto sur `eventDate`, génère une réponse LLM en français. Retourne `{ answer, sources, topK, temporalContext? }`
+- **MemoryScoringService** (`src/memory/memory-scoring.service.ts`) — Phase 3.1 :
+  - `computeImportance(text, eventDate?)` → score à la création (recency=1.0, access=0.0)
+  - `recomputeImportance(addedAt, accessCount, text, eventDate?)` → score recalculé à l'accès
+  - Formule : `0.3 * recency + 0.3 * access + 0.2 * emotion + 0.2 * future` (chaque facteur 0–1)
+  - `emotionScore` : mots-clés (important, urgent, critique, attention, crucial, prioritaire, essentiel, inquiet, stresse) → 1.0, sinon 0.3
+  - `futureScore` : `eventDate` futur → 1.0, aujourd'hui → 0.5, passé → 0.1, absent → 0.3
+  - `recencyScore` : `exp(-0.05 * daysSinceCreation)`
 - **DTOs** : `MemoryAddDto`, `MemorySearchDto` (avec `DateFilterDto` imbriqué), `MemoryQueryDto`
-- **Types** : `MemoryPayload` défini dans `src/memory/memory.types.ts` — distinct de `RagPayload` (`src/rag/rag.types.ts`) depuis la Phase 1.1
+- **Types** : `MemoryPayload` défini dans `src/memory/memory.types.ts` — champs `importance?: number` et `accessCount?: number` actifs depuis Phase 3.1
 
 #### Event Bus (`src/memory/memory.events.listener.ts`)
 
-NestJS EventEmitter2 configuré avec `wildcard: true` dans AppModule. Les événements mémoire sont émis par `MemoryService` et consommés par `MemoryEventsListener` :
+NestJS EventEmitter2 configuré avec `wildcard: true` dans AppModule. Les événements mémoire sont émis par `MemoryService` et consommés par `MemoryEventsListener` (injecte `VectorstoreService` + `MemoryScoringService` depuis Phase 3.1) :
 
-| Événement         | Données                             | Log                                           |
-| ----------------- | ----------------------------------- | --------------------------------------------- |
-| `MEMORY_ADDED`    | `{ id, source?, eventDate?, text }` | Confirmation de stockage avec aperçu du texte |
-| `MEMORY_SEARCHED` | `{ query, resultCount }`            | Requête de recherche et nombre de résultats   |
-| `MEMORY_QUERIED`  | `{ question, topK, sourceIds }`     | Question posée et IDs des sources utilisées   |
+| Événement         | Données                                        | Comportement                                                                                          |
+| ----------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `MEMORY_ADDED`    | `{ id, source?, eventDate?, text }`            | Log de confirmation avec aperçu du texte                                                              |
+| `MEMORY_SEARCHED` | `{ query, resultCount, topK, resultIds[] }`    | Log + incrémente `accessCount` et recalcule `importance` pour chaque point retourné (fire-and-forget) |
+| `MEMORY_QUERIED`  | `{ question, topK, sourceIds }`                | Log de la question et des IDs sources                                                                 |
 
 #### Module Ollama (`src/ollama/`)
 
@@ -146,12 +153,12 @@ Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine), com
 
 #### Stratégie Qdrant dual-collection
 
-| Collection        | Usage                      | Champs payload                                           |
-| ----------------- | -------------------------- | -------------------------------------------------------- |
-| `domainknowledge` | Documents RAG (PDF/TXT/MD) | `source`, `chunkIndex`, `text`                           |
-| `jarvis_for_home` | Mémoire conversationnelle  | `source`, `text`, `addedAt`, `contextType`, `eventDate?` |
+| Collection        | Usage                      | Champs payload                                                                              |
+| ----------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
+| `domainknowledge` | Documents RAG (PDF/TXT/MD) | `source`, `chunkIndex`, `text`                                                              |
+| `jarvis_for_home` | Mémoire conversationnelle  | `source`, `text`, `addedAt`, `contextType`, `eventDate?`, `importance`, `accessCount`       |
 
-Les index datetime sont créés automatiquement sur `addedAt` et `eventDate` dans `jarvis_for_home`.
+Les index datetime sont créés automatiquement sur `addedAt` et `eventDate` dans `jarvis_for_home`. `importance` et `accessCount` sont mis à jour via `setPayload()` après chaque recherche (Phase 3.1). Méthodes `VectorstoreService` ajoutées : `retrieveMemoryPoints(ids[])` et `updateMemoryPayload(pointId, fields)` avec `wait: false` (best-effort).
 
 ### jarvis-ui/ — Frontend Angular
 

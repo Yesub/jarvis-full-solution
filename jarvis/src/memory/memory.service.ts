@@ -9,6 +9,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OllamaService } from '../ollama/ollama.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
 import { TemporalService } from '../temporal/temporal.service';
+import { MemoryScoringService } from './memory-scoring.service';
 import type { MemoryPayload } from './memory.types';
 import {
   JARVIS_EVENTS,
@@ -28,6 +29,7 @@ export class MemoryService {
     private readonly vs: VectorstoreService,
     private readonly temporal: TemporalService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly scoring: MemoryScoringService,
   ) {
     this.defaultTopK = Number(this.config.get('RAG_TOP_K') ?? 5);
   }
@@ -41,6 +43,7 @@ export class MemoryService {
       await this.vs.ensureMemoryCollection(vector.length);
 
       const addedAt = new Date().toISOString();
+      const importance = this.scoring.computeImportance(text, eventDate);
       const memoryId = uuidv4();
       await this.vs.upsertMemory([
         {
@@ -51,6 +54,8 @@ export class MemoryService {
             text,
             addedAt,
             contextType,
+            importance,
+            accessCount: 0,
             ...(eventDate !== undefined ? { eventDate } : {}),
           } satisfies MemoryPayload,
         },
@@ -89,24 +94,32 @@ export class MemoryService {
       const [queryVector] = await this.ollama.embed([query]);
       const hits = await this.vs.searchMemory(queryVector, k, dateFilter);
 
-      const results = hits.map((h) => {
+      const rawHits = hits.map((h) => {
         const p = h.payload as MemoryPayload;
         return {
+          id: String(h.id),
           text: p.text,
           source: p.source,
-          score: h.score,
+          score: h.score * (p.importance ?? 0.3),
           addedAt: p.addedAt,
           eventDate: p.eventDate,
           contextType: p.contextType,
+          importance: p.importance ?? 0.3,
+          accessCount: p.accessCount ?? 0,
         };
       });
 
+      const ranked = rawHits.sort((a, b) => b.score - a.score);
+      const resultIds = ranked.map((r) => r.id);
+
       this.eventEmitter.emit(JARVIS_EVENTS.MEMORY_SEARCHED, {
         query,
-        resultCount: results.length,
+        resultCount: ranked.length,
         topK: k,
+        resultIds,
       } satisfies MemorySearchedEvent);
 
+      const results = ranked.map(({ id: _id, ...r }) => r);
       return { results, topK: k };
     } catch (error) {
       this.logger.error('Recherche mémoire échouée', error);

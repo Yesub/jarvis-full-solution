@@ -172,6 +172,7 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 - Détection de récurrence (`"tous les mardis"`) et de direction temporelle (passé / futur)
 - Q&A en langage naturel avec réponse LLM en français
 - Event bus interne (EventEmitter2) pour les opérations mémoire
+- **Scoring d'importance** (Phase 3.1) : chaque souvenir reçoit un score `0.0–1.0` combinant fraîcheur, fréquence d'accès, mots-clés émotionnels et date future ; les résultats de recherche sont re-rankés par `vectorScore × importance` ; le score est mis à jour automatiquement à chaque accès
 
 ### Reconnaissance vocale
 
@@ -306,7 +307,7 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 | ----- | ------------------------------------------------------------------------- | --------------------------------- |
 | **1** | Fondations — types, event bus, multi-LLM, agent context, temporal enrichi | ✅ 1.1–1.5 terminés               |
 | **2** | Intent engine & agent core — classification LLM, routing, meta-routing, UI | ✅ 2.1–2.4 terminés               |
-| **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph                  | 🔜 planifié                       |
+| **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph                  | 🚧 3.1 terminé                    |
 | **4** | Actions & proactivité — action engine, goals, identity                    | 🔜 planifié                       |
 | **5** | Profondeur cognitive — context fusion, feedback, hallucination guard      | 🔜 planifié                       |
 
@@ -324,6 +325,10 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 - **2.2** — `AgentModule` enregistré dans `AppModule` ; `AgentController` (`POST /agent/process`, `/agent/classify`) ; `AgentService` (orchestration : classify → emit event → route → update context) ; `IntentRouterService` (routing de 18 `IntentType` vers `MemoryService` / `RagService` / `LlmService`, intents phase 4 graceful "not yet implemented") ; `AgentContextManager` (sessions TTL 30 min, historique 20 messages) ; `IntentType` étendu de 3 à 18 types ; `PENDING_ACTIONS`, `AgentResponse`, `ConversationMessage`, `PendingConfirmation` dans `src/agent/agent.types.ts`
 - **2.3** — Meta-routing dans `AgentService` : CORRECTION (re-classification du texte corrigé + re-routing via `IntentRouterService`, garde anti-récursion), CONFIRMATION (validation TTL + `executePendingAction()` pour MEMORY_ADD / MEMORY_QUERY / RAG_QUESTION), REJECTION (annulation action en attente + mise à jour historique)
 - **2.4** — Interface Angular Agent (`/agent`) : `AgentComponent` standalone avec historique de conversation (bulles user/assistant), badges intent+confidence colorés, streaming SSE via `/agent/process/stream`, micro intégré (`SpeechService`), gestion de `sessionId` cross-requêtes ; `AgentService` et `ApiService` étendus ; navigation toolbar avec onglets RAG/LLM et Agent
+
+### Phase 3 — Détail des implémentations
+
+- **3.1** — Scoring d'importance mémoire : `MemoryScoringService` (`src/memory/memory-scoring.service.ts`) avec formule `0.3*recency + 0.3*access + 0.2*emotion + 0.2*future` ; `importance` et `accessCount: 0` stockés dans le payload Qdrant à chaque `add()` ; `search()` re-rank les résultats par `vectorScore × importance` et expose `importance`/`accessCount` dans la réponse ; `MemoryEventsListener` incrémente `accessCount` et recalcule `importance` de façon asynchrone (fire-and-forget) après chaque recherche via `retrieveMemoryPoints()` + `updateMemoryPayload()` ; anciens souvenirs sans score compatibles via `?? 0.3` / `?? 0`
 
 ---
 

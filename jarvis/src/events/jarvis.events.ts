@@ -31,6 +31,7 @@ export interface MemorySearchedEvent {
   query: string;
   resultCount: number;
   topK: number;
+  resultIds: string[];
 }
 
 // ── Future events (Phase 2–5) ─────────────────────────────────────────────────

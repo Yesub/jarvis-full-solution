@@ -5,10 +5,11 @@ import { TemporalModule } from '../temporal/temporal.module';
 import { MemoryService } from './memory.service';
 import { MemoryController } from './memory.controller';
 import { MemoryEventsListener } from './memory.events.listener';
+import { MemoryScoringService } from './memory-scoring.service';
 
 @Module({
   imports: [OllamaModule, VectorstoreModule, TemporalModule],
-  providers: [MemoryService, MemoryEventsListener],
+  providers: [MemoryService, MemoryEventsListener, MemoryScoringService],
   controllers: [MemoryController],
   exports: [MemoryService],
 })
