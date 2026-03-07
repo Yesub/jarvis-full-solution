@@ -36,7 +36,7 @@ export class OllamaService {
     this.smallModel =
       this.config.get<string>('OLLAMA_SMALL_MODEL') ?? 'qwen3:4b';
     this.largeModel =
-      this.config.get<string>('OLLAMA_LARGE_MODEL') ?? 'gpt-oss:20b';
+      this.config.get<string>('OLLAMA_LARGE_MODEL') ?? 'qwen3.5:9b';
   }
 
   private resolveModel(model: 'small' | 'medium' | 'large'): string {

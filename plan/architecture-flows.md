@@ -16,7 +16,7 @@ graph TB
         MemCtrl["Memory Controller\n/memory/add\n/memory/search\n/memory/query"]
         LLMCtrl["LLM Controller\n/llm/ask\n/llm/ask/stream"]
         STTCtrl["STT Controller\n/stt/transcribe"]
-        AgentCtrl["Agent Controller\n/agent/classify\n(Phase 2.2)"]
+        AgentCtrl["Agent Controller\n/agent/process\n/agent/classify"]
 
         subgraph Services["Services internes"]
             OllamaSvc["OllamaService\nsmall / medium / large"]
@@ -24,6 +24,9 @@ graph TB
             MemSvc["MemoryService"]
             TempSvc["TemporalService\nparse / parseInterval\ndetectRecurrence / detectDirection"]
             IntentEng["IntentEngine\nLLM → regex fallback"]
+            AgentSvc["AgentService\norchestration"]
+            RouterSvc["IntentRouterService\n18 intents → services"]
+            CtxMgr["AgentContextManager\nsessions TTL 30 min"]
             EventBus["EventEmitter2\nMEMORY_ADDED\nMEMORY_SEARCHED\nMEMORY_QUERIED"]
         end
     end
@@ -58,7 +61,12 @@ graph TB
     MemSvc --> TempSvc
     MemSvc -->|"emit events"| EventBus
     STTCtrl -->|"proxy audio"| STTServer
-    AgentCtrl --> IntentEng
+    AgentCtrl --> AgentSvc
+    AgentSvc --> IntentEng
+    AgentSvc --> RouterSvc
+    AgentSvc --> CtxMgr
+    RouterSvc --> MemSvc
+    RouterSvc --> OllamaSvc
     IntentEng -->|"generateWith('small')"| OllamaSvc
 
     OllamaSvc --> Ollama
@@ -118,7 +126,7 @@ sequenceDiagram
     NestJS->>Qdrant: search domainknowledge (top-K=5)
     Qdrant-->>NestJS: chunks pertinents + scores
     NestJS-->>UI: SSE event: metadata\n{ sources, topK }
-    NestJS->>Ollama: generate(prompt+contexte) → large model\ngpt-oss:20b (stream)
+    NestJS->>Ollama: generate(prompt+contexte) → large model\nqwen3.5:9b (stream)
     loop tokens streamés
         Ollama-->>NestJS: token
         NestJS-->>UI: SSE data: token
@@ -213,7 +221,7 @@ graph LR
     Call["Appel OllamaService"]
     Call -->|"resolveModel('small')"| SM["qwen3:4b\nOLLAMA_LLM_SMALL_MODEL\nClassification / intention"]
     Call -->|"resolveModel('medium')\nou generate() direct"| MM["mistral:latest\nOLLAMA_LLM_MODEL\nMémoire / résumés"]
-    Call -->|"resolveModel('large')"| LM["gpt-oss:20b\nOLLAMA_LLM_LARGE_MODEL\nRAG / raisonnement"]
+    Call -->|"resolveModel('large')"| LM["qwen3.5:9b\nOLLAMA_LLM_LARGE_MODEL\nRAG / raisonnement"]
     SM --> Ollama["Ollama :11434\nPOST /api/generate"]
     MM --> Ollama
     LM --> Ollama
@@ -247,4 +255,56 @@ graph TB
     RAGSvc["RagService\nRagPayload"] -->|"upsert / search"| DC
     MemSvc["MemoryService\nMemoryPayload"] -->|"upsert / search"| MEM
     MEM -->|"index datetime"| DateIdx["Index addedAt\nIndex eventDate"]
+```
+
+---
+
+## 9. Flux Agent — Traitement d'une requête (Phase 2.2)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Client
+    participant AgentCtrl as AgentController\n/agent/process
+    participant AgentSvc as AgentService
+    participant CtxMgr as AgentContextManager
+    participant IntentEng as IntentEngine
+    participant Router as IntentRouterService
+    participant Services as MemoryService / RagService / LlmService
+
+    User->>Client: texte (+ sessionId optionnel)
+    Client->>AgentCtrl: POST /agent/process
+    AgentCtrl->>AgentSvc: process(dto)
+    AgentSvc->>CtxMgr: getOrCreate(sessionId)
+    CtxMgr-->>AgentSvc: AgentContext
+    AgentSvc->>IntentEng: classify(text)
+    IntentEng-->>AgentSvc: IntentResult
+    alt meta-intent (CORRECTION / CONFIRMATION / REJECTION)
+        AgentSvc->>AgentSvc: handleMetaIntent()
+        Note over AgentSvc: CORRECTION → re-classify + re-route\nCONFIRMATION → TTL check + execute\nREJECTION → cancel + log
+    else intent normal
+        AgentSvc->>Router: route(intentResult, context)
+        Router->>Services: appel service approprié
+        Services-->>Router: EngineResult
+        Router-->>AgentSvc: EngineResult
+    end
+    AgentSvc->>CtxMgr: addMessage(user + assistant)
+    AgentSvc-->>AgentCtrl: AgentResponse
+    AgentCtrl-->>Client: { sessionId, intent, confidence, answer, sources, actions }
+```
+
+---
+
+## 10. Meta-routing — Correction / Confirmation / Rejection (Phase 2.3)
+
+```mermaid
+graph TD
+    Input["Texte utilisateur"] --> Classify["IntentEngine.classify()"]
+    Classify -->|"intent normal"| Route["IntentRouterService.route()"]
+    Classify -->|"CORRECTION"| Corr["handleMetaIntent(CORRECTION)\nRe-classify texte corrigé\n+ re-route via router\nguarde anti-récursion"]
+    Classify -->|"CONFIRMATION"| Conf["handleMetaIntent(CONFIRMATION)\nValidation TTL expiry\nexecutePendingAction()"]
+    Classify -->|"REJECTION"| Rej["handleMetaIntent(REJECTION)\nAnnulation action en attente\n+ mise à jour historique"]
+    Route --> Services["MemoryService / RagService / LlmService"]
+    Corr --> Route2["IntentRouterService.route()\ncorrection re-routée"]
+    Conf --> Exec["executePendingAction()\nMEMORY_ADD / MEMORY_QUERY / RAG_QUESTION"]
 ```

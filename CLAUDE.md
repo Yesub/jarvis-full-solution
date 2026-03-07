@@ -32,18 +32,18 @@ Point d'entrée : `src/main.ts` (port 3000, Swagger sur `/api`)
 
 Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor` (logs method/URL/durée), `ValidationPipe` (whitelist + transform)
 
-| Module / Controller | Routes | Rôle |
-| ------------------- | ------ | ---- |
-| RAG | `POST /rag/ingest` (max 50 MB), `/rag/ask`, `/rag/ask/stream` | Ingestion de documents (PDF/TXT/MD) et texte brut, Q&A avec contexte vectoriel. Le stream émet `event: metadata` (sources, topK) puis les tokens |
-| Memory | `POST /memory/add`, `/memory/search`, `/memory/query` | Mémoire conversationnelle persistante avec contexte temporel. `/memory/add` stocke un fait, `/memory/search` cherche par similarité + filtre date, `/memory/query` répond en langage naturel avec contexte LLM |
-| LLM | `POST /llm/ask`, `/llm/ask/stream` | Génération LLM directe sans contexte RAG (pas de system prompt) |
-| STT | `POST /stt/transcribe` (max 25 MB) | Proxy vers le serveur Python Whisper (fichier temp supprimé après transcription) |
-| HealthController | `GET /health` | Check de santé (controller standalone dans AppModule, pas de module dédié) |
-| ConfigModule | (global) | Chargement `.env` via `@nestjs/config` |
-| Ollama | (service interne) | Client Ollama multi-modèle : `embed()`, `generate()`, `generateWith(size)` avec routage small/medium/large |
-| Agent | `POST /agent/classify` (Phase 2.2) | Intent engine (`src/agent/intent/`) + types partagés (`src/agent/agent.types.ts`). `IntentEngine` créé en Phase 2.1, module non encore enregistré dans AppModule |
-| Vectorstore | (service interne) | Client Qdrant, gère deux collections : `domainknowledge` (documents) et `jarvis_for_home` (mémoire) |
-| Temporal | (service interne) | Extraction d'expressions temporelles françaises via chrono-node (`chrono.fr.parse`) |
+| Module / Controller | Routes                                                        | Rôle                                                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RAG                 | `POST /rag/ingest` (max 50 MB), `/rag/ask`, `/rag/ask/stream` | Ingestion de documents (PDF/TXT/MD) et texte brut, Q&A avec contexte vectoriel. Le stream émet `event: metadata` (sources, topK) puis les tokens                                                               |
+| Memory              | `POST /memory/add`, `/memory/search`, `/memory/query`         | Mémoire conversationnelle persistante avec contexte temporel. `/memory/add` stocke un fait, `/memory/search` cherche par similarité + filtre date, `/memory/query` répond en langage naturel avec contexte LLM |
+| LLM                 | `POST /llm/ask`, `/llm/ask/stream`                            | Génération LLM directe sans contexte RAG (pas de system prompt)                                                                                                                                                |
+| STT                 | `POST /stt/transcribe` (max 25 MB)                            | Proxy vers le serveur Python Whisper (fichier temp supprimé après transcription)                                                                                                                               |
+| HealthController    | `GET /health`                                                 | Check de santé (controller standalone dans AppModule, pas de module dédié)                                                                                                                                     |
+| ConfigModule        | (global)                                                      | Chargement `.env` via `@nestjs/config`                                                                                                                                                                         |
+| Ollama              | (service interne)                                             | Client Ollama multi-modèle : `embed()`, `generate()`, `generateWith(size)` avec routage small/medium/large                                                                                                     |
+| Agent               | `POST /agent/process`, `POST /agent/classify`                 | Orchestration complète : classification → routing → réponse contextuelle. `AgentService` + `IntentRouterService` + `AgentContextManager`. Module enregistré dans AppModule (Phase 2.2)                         |
+| Vectorstore         | (service interne)                                             | Client Qdrant, gère deux collections : `domainknowledge` (documents) et `jarvis_for_home` (mémoire)                                                                                                            |
+| Temporal            | (service interne)                                             | Extraction d'expressions temporelles françaises via chrono-node (`chrono.fr.parse`)                                                                                                                            |
 
 **Stack :** NestJS 11, TypeScript, LangChain (PDFLoader, text splitting), Qdrant JS Client, chrono-node, class-validator, class-transformer
 
@@ -60,27 +60,27 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 
 NestJS EventEmitter2 configuré avec `wildcard: true` dans AppModule. Les événements mémoire sont émis par `MemoryService` et consommés par `MemoryEventsListener` :
 
-| Événement | Données | Log |
-| --------- | ------- | --- |
-| `MEMORY_ADDED` | `{ id, source?, eventDate?, text }` | Confirmation de stockage avec aperçu du texte |
-| `MEMORY_SEARCHED` | `{ query, resultCount }` | Requête de recherche et nombre de résultats |
-| `MEMORY_QUERIED` | `{ question, topK, sourceIds }` | Question posée et IDs des sources utilisées |
+| Événement         | Données                             | Log                                           |
+| ----------------- | ----------------------------------- | --------------------------------------------- |
+| `MEMORY_ADDED`    | `{ id, source?, eventDate?, text }` | Confirmation de stockage avec aperçu du texte |
+| `MEMORY_SEARCHED` | `{ query, resultCount }`            | Requête de recherche et nombre de résultats   |
+| `MEMORY_QUERIED`  | `{ question, topK, sourceIds }`     | Question posée et IDs des sources utilisées   |
 
 #### Module Ollama (`src/ollama/`)
 
 Routage multi-modèle via `resolveModel(size: 'small' | 'medium' | 'large')` :
 
-| Taille | Variable env | Modèle par défaut | Usage |
-| ------ | ------------ | ----------------- | ----- |
-| `small` | `OLLAMA_LLM_SMALL_MODEL` | `qwen3:4b` | Classification, intention, tâches légères |
-| `medium` | `OLLAMA_LLM_MODEL` | `mistral:latest` | Génération mémoire, résumés |
-| `large` | `OLLAMA_LLM_LARGE_MODEL` | `gpt-oss:20b` | RAG, raisonnement complexe |
+| Taille   | Variable env             | Modèle par défaut | Usage                                     |
+| -------- | ------------------------ | ----------------- | ----------------------------------------- |
+| `small`  | `OLLAMA_LLM_SMALL_MODEL` | `qwen3:4b`        | Classification, intention, tâches légères |
+| `medium` | `OLLAMA_LLM_MODEL`       | `mistral:latest`  | Génération mémoire, résumés               |
+| `large`  | `OLLAMA_LLM_LARGE_MODEL` | `qwen3.5:9b`      | RAG, raisonnement complexe                |
 
 Méthodes disponibles : `generate(prompt)` / `generateStream(prompt)` (modèle medium par défaut), `generateWith(size, prompt)` / `generateStreamWith(size, prompt)` (taille explicite).
 
 #### Module Agent (`src/agent/`)
 
-Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine). Le module n'est pas encore enregistré dans AppModule (activation prévue Phase 2.2).
+Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine), complété en Phase 2.2 (module complet + routing) et Phase 2.3 (meta-routing). Enregistré dans `AppModule`.
 
 **Types partagés** (`src/agent/agent.types.ts`) :
 
@@ -89,8 +89,9 @@ Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine). Le 
 - `PendingConfirmation` — paramètres d'action avec TTL (expiry ISO 8601)
 - `IdentityProfile` — nom, rôle, projets, priorités, préférences utilisateur
 - `AgentProcessDto` — DTO d'entrée : `sessionId`, `text`, `source`
-- `AgentResponse` — intent, confiance, réponse, sources, actions, `hallucinationWarning?`
+- `AgentResponse` — `sessionId`, intent, confiance, réponse, sources, actions, `hallucinationWarning?`
 - `AgentAction` — type, description, statut (`executed` | `pending_confirmation` | `failed`)
+- `PENDING_ACTIONS` — constante `as const` registrant les types d'actions confirmables : `MEMORY_ADD`, `MEMORY_QUERY`, `RAG_QUESTION` ; `PendingActionType` dérivé pour le typage strict
 
 **Intent Engine** (`src/agent/intent/`) — implémenté en Phase 2.1 :
 
@@ -98,9 +99,34 @@ Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine). Le 
   - `classify(text)` → `IntentResult` — méthode principale, ne lève jamais d'exception
   - `classifyWithLLM(text)` → appelle `OllamaService.generateWith('small', ...)` avec `qwen3:4b` ; extrait le JSON en gérant les balises `<think>` (qwen3) et les blocs ` ```json ` ; retourne `null` si Ollama indisponible
   - `classifyWithRegex(text)` → miroir synchrone des patterns de `command_classifier.py`
-- `IntentType` (`intent.types.ts`) : enum `ADD | QUERY | UNKNOWN`
-- `IntentResult` : `{ intent, confidence: number, content: string, entities: { dateExpression? }, source: 'llm'|'regex' }`
-- `CLASSIFICATION_SYSTEM_PROMPT` (`classification-prompt.ts`) : prompt système en français pour qwen3:4b ; impose un JSON strict sans prose ni balises markdown
+- `IntentType` (`intent.types.ts`) : enum de 18 types — mémoire (MEMORY_ADD, MEMORY_QUERY, MEMORY_UPDATE, MEMORY_DELETE), agenda (SCHEDULE_EVENT, QUERY_SCHEDULE), tâches (CREATE_TASK, QUERY_TASKS, COMPLETE_TASK), connaissance (RAG_QUESTION, GENERAL_QUESTION), objectifs (ADD_GOAL, QUERY_GOALS), actions (EXECUTE_ACTION), meta (CORRECTION, CONFIRMATION, REJECTION, CHITCHAT, UNKNOWN)
+- `IntentResult` : `{ intent, confidence: number, extractedContent, entities: ExtractedEntities, source: 'llm'|'regex', priority: 'high'|'normal'|'low', secondary? }`
+- `CLASSIFICATION_SYSTEM_PROMPT` (`classification-prompt.ts`) : prompt système en français pour qwen3:4b ; décrit les 18 types d'intents, impose un JSON strict sans prose ni balises markdown
+
+**AgentService** (`src/agent/agent.service.ts`) — orchestration Phase 2.2 + 2.3 :
+
+- `classify(text)` → délègue à `IntentEngine`
+- `process(dto)` → flux principal : `getOrCreate(sessionId)` → `classify(text)` → emit event → `handleMetaIntent()` ou `router.route()` → `addMessage()` → `AgentResponse`
+- `handleMetaIntent(intent, context, text)` async — gère les trois cas meta :
+  - **CORRECTION** : re-classifie le texte corrigé via `IntentEngine`, re-route via `IntentRouterService` (garde anti-récursion si la correction est elle-même un meta-intent)
+  - **CONFIRMATION** : valide le TTL de `PendingConfirmation`, appelle `executePendingAction()` si non expiré
+  - **REJECTION** : annule l'action en attente, met à jour l'historique de session
+- `executePendingAction(type, params)` → dispatche selon `PENDING_ACTIONS` : `MEMORY_ADD` → `MemoryService.add()`, `MEMORY_QUERY` → `MemoryService.query()`, `RAG_QUESTION` → `RagService.ask()`
+
+**IntentRouterService** (`src/agent/router/intent-router.service.ts`) — Phase 2.2 :
+
+- `route(intentResult, context)` → `EngineResult` — switch sur 18 `IntentType`
+- Dispatche vers `MemoryService` (MEMORY_ADD, MEMORY_QUERY), `RagService` (RAG_QUESTION), `LlmService` (GENERAL_QUESTION, CHITCHAT)
+- Intents Phase 4 (SCHEDULE_EVENT, CREATE_TASK, ADD_GOAL, EXECUTE_ACTION…) retournent un message graceful "not yet implemented"
+- UNKNOWN retourne un message "je n'ai pas compris"
+- Le router est stateless : aucune modification de contexte session
+
+**AgentContextManager** (`src/agent/context/agent-context.manager.ts`) — Phase 2.2 :
+
+- Sessions en mémoire dans un `Map<string, AgentContext>`, TTL 30 minutes
+- `getOrCreate(sessionId?)` — crée un UUID si absent, nettoie les sessions expirées à chaque appel
+- `addMessage(sessionId, message)` — ajoute un `ConversationMessage`, conserve les 20 derniers
+- `setPendingConfirmation(sessionId, confirmation)` / `clearPendingConfirmation(sessionId)` — gère les actions en attente de confirmation utilisateur
 
 #### Module Temporal (`src/temporal/`)
 
@@ -120,10 +146,10 @@ Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine). Le 
 
 #### Stratégie Qdrant dual-collection
 
-| Collection | Usage | Champs payload |
-| ---------- | ----- | -------------- |
-| `domainknowledge` | Documents RAG (PDF/TXT/MD) | `source`, `chunkIndex`, `text` |
-| `jarvis_for_home` | Mémoire conversationnelle | `source`, `text`, `addedAt`, `contextType`, `eventDate?` |
+| Collection        | Usage                      | Champs payload                                           |
+| ----------------- | -------------------------- | -------------------------------------------------------- |
+| `domainknowledge` | Documents RAG (PDF/TXT/MD) | `source`, `chunkIndex`, `text`                           |
+| `jarvis_for_home` | Mémoire conversationnelle  | `source`, `text`, `addedAt`, `contextType`, `eventDate?` |
 
 Les index datetime sont créés automatiquement sur `addedAt` et `eventDate` dans `jarvis_for_home`.
 
@@ -141,10 +167,10 @@ Page unique (`RagComponent`) avec 3 sections :
 
 Chaque section supporte l'entrée vocale via microphone (WebM → STT).
 
-| Service | Rôle |
-| ------- | ---- |
-| `ApiService` | Appels HTTP et streaming SSE via Fetch API + ReadableStream |
-| `SpeechService` | Enregistrement audio via MediaRecorder (WebM) |
+| Service         | Rôle                                                        |
+| --------------- | ----------------------------------------------------------- |
+| `ApiService`    | Appels HTTP et streaming SSE via Fetch API + ReadableStream |
+| `SpeechService` | Enregistrement audio via MediaRecorder (WebM)               |
 
 Config : `src/environments/environment.ts` → `apiUrl: 'http://localhost:3000'`
 
@@ -172,15 +198,15 @@ Point d'entrée : `wake_listener.py`
 - Classifie la transcription et route vers le backend NestJS (mémoire)
 - Répond vocalement à l'utilisateur via Piper TTS (synthèse vocale neurale locale)
 
-| Fichier | Rôle |
-| ------- | ---- |
-| `wake_listener.py` | Boucle principale : écoute micro → wake word → enregistrement → STT → classification → routage backend → réponse TTS |
-| `config.py` | Configuration via variables d'environnement (dataclass), inclut `JARVIS_API_URL` et config TTS |
-| `recorder.py` | Enregistrement audio post-wake avec détection de silence par RMS |
-| `stt_client.py` | Client HTTP pour envoi audio au serveur STT (`POST /transcribe`) |
-| `command_classifier.py` | Classifie la transcription en `ADD` / `QUERY` / `UNKNOWN` via LLM (backend `/agent/classify`) avec fallback regex |
-| `jarvis_client.py` | Client HTTP pour le backend NestJS (`/memory/add`, `/memory/query`) |
-| `tts_client.py` | Synthèse vocale locale via Piper TTS (modèle `fr_FR-siwis-medium`, auto-téléchargé dans `models/`) |
+| Fichier                 | Rôle                                                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `wake_listener.py`      | Boucle principale : écoute micro → wake word → enregistrement → STT → classification → routage backend → réponse TTS |
+| `config.py`             | Configuration via variables d'environnement (dataclass), inclut `JARVIS_API_URL` et config TTS                       |
+| `recorder.py`           | Enregistrement audio post-wake avec détection de silence par RMS                                                     |
+| `stt_client.py`         | Client HTTP pour envoi audio au serveur STT (`POST /transcribe`)                                                     |
+| `command_classifier.py` | Classifie la transcription en `ADD` / `QUERY` / `UNKNOWN` via LLM (backend `/agent/classify`) avec fallback regex    |
+| `jarvis_client.py`      | Client HTTP pour le backend NestJS (`/memory/add`, `/memory/query`)                                                  |
+| `tts_client.py`         | Synthèse vocale locale via Piper TTS (modèle `fr_FR-siwis-medium`, auto-téléchargé dans `models/`)                   |
 
 **Stack :** Python, OpenWakeWord, PyAudio, NumPy, requests, python-dotenv, piper-tts, sounddevice
 
@@ -188,11 +214,11 @@ Point d'entrée : `wake_listener.py`
 
 Dual-path depuis Phase 2.1 : tente d'abord le backend LLM (`POST /agent/classify` via `_classify_with_llm()`), retombe sur les regex si `ConnectionError` (endpoint non encore disponible jusqu'en Phase 2.2). `wake_listener.py` passe `config.jarvis_api_url` à `_route_command()` qui le fournit à `classify()`.
 
-| Type | Patterns déclencheurs (exemples) | Action |
-| ---- | --------------------------------- | ------ |
-| `ADD` | "Ajoute que", "Mémorise", "Retiens", "Note", "N'oublie pas", "Enregistre" | Supprime le préfixe et appelle `/memory/add` |
-| `QUERY` | "qu'est-ce que", "rappelle-moi", "dis-moi", "quand", "à quelle heure", "ai-je prévu" | Envoie la question à `/memory/query` |
-| `UNKNOWN` | Tout le reste | Log uniquement, pas d'appel backend |
+| Type      | Patterns déclencheurs (exemples)                                                     | Action                                       |
+| --------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| `ADD`     | "Ajoute que", "Mémorise", "Retiens", "Note", "N'oublie pas", "Enregistre"            | Supprime le préfixe et appelle `/memory/add` |
+| `QUERY`   | "qu'est-ce que", "rappelle-moi", "dis-moi", "quand", "à quelle heure", "ai-je prévu" | Envoie la question à `/memory/query`         |
+| `UNKNOWN` | Tout le reste                                                                        | Log uniquement, pas d'appel backend          |
 
 ### docker-qdrant/ — Base vectorielle
 
@@ -213,7 +239,7 @@ CORS_ORIGINS=http://localhost:4200
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_LLM_SMALL_MODEL=qwen3:4b
 OLLAMA_LLM_MODEL=mistral:latest
-OLLAMA_LLM_LARGE_MODEL=gpt-oss:20b
+OLLAMA_LLM_LARGE_MODEL=qwen3.5:9b
 OLLAMA_EMBED_MODEL=qwen3-embedding:8b
 
 # Qdrant

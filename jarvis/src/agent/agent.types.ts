@@ -21,6 +21,15 @@ export interface PendingConfirmation {
   expiresAt: string; // ISO 8601
 }
 
+export const PENDING_ACTIONS = {
+  MEMORY_ADD: 'memory_add',
+  MEMORY_QUERY: 'memory_query',
+  RAG_QUESTION: 'rag_question',
+} as const;
+
+export type PendingActionType =
+  (typeof PENDING_ACTIONS)[keyof typeof PENDING_ACTIONS];
+
 export interface IdentityProfile {
   name: string;
   role?: string;

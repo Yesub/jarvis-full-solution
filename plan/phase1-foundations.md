@@ -208,9 +208,9 @@ A single Ollama model (`OLLAMA_LLM_MODEL`) is used for all tasks. Intent classif
 
 ```env
 # LLM Models (Multi-model routing)
-OLLAMA_LLM_MODEL=gpt-oss:20b          # Default / medium — RAG, memory Q&A
+OLLAMA_LLM_MODEL=qwen3.5:9b          # Default / medium — RAG, memory Q&A
 OLLAMA_SMALL_MODEL=qwen3:4b            # Fast — intent classification, entity extraction
-OLLAMA_LARGE_MODEL=gpt-oss:20b         # Quality — complex reasoning (same as default for now)
+OLLAMA_LARGE_MODEL=qwen3.5:9b         # Quality — complex reasoning (same as default for now)
 ```
 
 **Modify:** `jarvis/src/ollama/ollama.service.ts`
@@ -231,7 +231,7 @@ export class OllamaService {
     );
     this.llmModel = this.configService.get<string>(
       "OLLAMA_LLM_MODEL",
-      "gpt-oss:20b",
+      "qwen3.5:9b",
     );
     this.embedModel = this.configService.get<string>(
       "OLLAMA_EMBED_MODEL",

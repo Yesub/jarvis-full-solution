@@ -50,7 +50,7 @@ Upload (PDF/TXT/MD) → LangChain parsing → chunking (1000 chars, overlap 150)
 
 ```text
 Question → embedding → recherche Qdrant top-5 → contexte + prompt
-  → LLM gpt-oss:20b (stream SSE) → réponse
+  → LLM qwen3.5:9b (stream SSE) → réponse
 ```
 
 #### Wake Word → Mémoire
@@ -66,12 +66,12 @@ Microphone → "Hey Jarvis" (OpenWakeWord) → enregistrement silence RMS → WA
 
 ## Prérequis
 
-| Outil | Version | Usage |
-| ----- | ------- | ----- |
-| Node.js | 20+ | Backend NestJS + Frontend Angular |
-| Python | 3.10+ | STT server + Wake listener |
-| Docker | - | Qdrant (base vectorielle) |
-| [Ollama](https://ollama.com) | latest | LLM local + embeddings |
+| Outil                        | Version | Usage                             |
+| ---------------------------- | ------- | --------------------------------- |
+| Node.js                      | 20+     | Backend NestJS + Frontend Angular |
+| Python                       | 3.10+   | STT server + Wake listener        |
+| Docker                       | -       | Qdrant (base vectorielle)         |
+| [Ollama](https://ollama.com) | latest  | LLM local + embeddings            |
 
 ### Modèles Ollama requis
 
@@ -79,7 +79,7 @@ Microphone → "Hey Jarvis" (OpenWakeWord) → enregistrement silence RMS → WA
 ollama pull qwen3-embedding:8b   # embeddings (4096 dims)
 ollama pull qwen3:4b             # LLM small (classification, intention)
 ollama pull mistral:latest       # LLM medium (mémoire, résumés)
-ollama pull gpt-oss:20b          # LLM large (RAG, raisonnement)
+ollama pull qwen3.5:9b          # LLM large (RAG, raisonnement)
 ```
 
 > Les trois modèles LLM sont configurables via `.env`. Seul l'embed model est requis pour le RAG de base.
@@ -186,11 +186,11 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 
 ### Multi-modèle Ollama
 
-| Taille | Modèle | Usage |
-| ------ | ------ | ----- |
-| small | `qwen3:4b` | Classification, intention |
-| medium | `mistral:latest` | Mémoire, résumés |
-| large | `gpt-oss:20b` | RAG, raisonnement complexe |
+| Taille | Modèle           | Usage                      |
+| ------ | ---------------- | -------------------------- |
+| small  | `qwen3:4b`       | Classification, intention  |
+| medium | `mistral:latest` | Mémoire, résumés           |
+| large  | `qwen3.5:9b`     | RAG, raisonnement complexe |
 
 ---
 
@@ -198,44 +198,45 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 
 ### RAG
 
-| Méthode | Route | Description |
-| ------- | ----- | ----------- |
-| `POST` | `/rag/ingest` | Ingestion fichier ou texte brut (max 50 MB) |
-| `POST` | `/rag/ask` | Q&A avec contexte documentaire |
-| `POST` | `/rag/ask/stream` | Q&A streamé (SSE) — émet `event: metadata` puis tokens |
+| Méthode | Route             | Description                                            |
+| ------- | ----------------- | ------------------------------------------------------ |
+| `POST`  | `/rag/ingest`     | Ingestion fichier ou texte brut (max 50 MB)            |
+| `POST`  | `/rag/ask`        | Q&A avec contexte documentaire                         |
+| `POST`  | `/rag/ask/stream` | Q&A streamé (SSE) — émet `event: metadata` puis tokens |
 
 ### Mémoire
 
-| Méthode | Route | Description |
-| ------- | ----- | ----------- |
-| `POST` | `/memory/add` | Stocker un fait avec contexte temporel optionnel |
-| `POST` | `/memory/search` | Recherche sémantique avec filtre de dates |
-| `POST` | `/memory/query` | Q&A complet en langage naturel |
+| Méthode | Route            | Description                                      |
+| ------- | ---------------- | ------------------------------------------------ |
+| `POST`  | `/memory/add`    | Stocker un fait avec contexte temporel optionnel |
+| `POST`  | `/memory/search` | Recherche sémantique avec filtre de dates        |
+| `POST`  | `/memory/query`  | Q&A complet en langage naturel                   |
 
 ### LLM direct
 
-| Méthode | Route | Description |
-| ------- | ----- | ----------- |
-| `POST` | `/llm/ask` | Génération LLM sans contexte RAG |
-| `POST` | `/llm/ask/stream` | Génération streamée (SSE) |
+| Méthode | Route             | Description                      |
+| ------- | ----------------- | -------------------------------- |
+| `POST`  | `/llm/ask`        | Génération LLM sans contexte RAG |
+| `POST`  | `/llm/ask/stream` | Génération streamée (SSE)        |
 
 ### STT
 
-| Méthode | Route | Description |
-| ------- | ----- | ----------- |
-| `POST` | `/stt/transcribe` | Transcription audio (max 25 MB, proxy Whisper) |
+| Méthode | Route             | Description                                    |
+| ------- | ----------------- | ---------------------------------------------- |
+| `POST`  | `/stt/transcribe` | Transcription audio (max 25 MB, proxy Whisper) |
 
-### Agent (Phase 2.2+)
+### Agent
 
-| Méthode | Route | Description |
-| ------- | ----- | ----------- |
-| `POST` | `/agent/classify` | Classification d'intention LLM (endpoint activé en Phase 2.2) |
+| Méthode | Route             | Description                                                                    |
+| ------- | ----------------- | ------------------------------------------------------------------------------ |
+| `POST`  | `/agent/process`  | Traitement complet : classification → routing → réponse contextuelle (session) |
+| `POST`  | `/agent/classify` | Classification d'intention seule (sans routing ni contexte de session)         |
 
 ### Santé
 
-| Méthode | Route | Description |
-| ------- | ----- | ----------- |
-| `GET` | `/health` | Check de santé du backend |
+| Méthode | Route     | Description               |
+| ------- | --------- | ------------------------- |
+| `GET`   | `/health` | Check de santé du backend |
 
 ---
 
@@ -251,7 +252,7 @@ CORS_ORIGINS=http://localhost:4200
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_LLM_SMALL_MODEL=qwen3:4b
 OLLAMA_LLM_MODEL=mistral:latest
-OLLAMA_LLM_LARGE_MODEL=gpt-oss:20b
+OLLAMA_LLM_LARGE_MODEL=qwen3.5:9b
 OLLAMA_EMBED_MODEL=qwen3-embedding:8b
 
 # Qdrant
@@ -300,13 +301,13 @@ TTS_ENABLED=true
 
 Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.md) pour le détail.
 
-| Phase | Titre | État |
-| ----- | ----- | ---- |
-| **1** | Fondations — types, event bus, multi-LLM, agent context, temporal enrichi | ✅ 1.1–1.5 terminés |
-| **2** | Intent engine & agent core — classification LLM, routing | 🚧 2.1 terminé, 2.2–2.4 planifiés |
-| **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph | 🔜 planifié |
-| **4** | Actions & proactivité — action engine, goals, identity | 🔜 planifié |
-| **5** | Profondeur cognitive — context fusion, feedback, hallucination guard | 🔜 planifié |
+| Phase | Titre                                                                     | État                              |
+| ----- | ------------------------------------------------------------------------- | --------------------------------- |
+| **1** | Fondations — types, event bus, multi-LLM, agent context, temporal enrichi | ✅ 1.1–1.5 terminés               |
+| **2** | Intent engine & agent core — classification LLM, routing, meta-routing    | 🚧 2.1–2.3 terminés, 2.4 planifié |
+| **3** | Mémoire enrichie — scoring, RAG hybride, knowledge graph                  | 🔜 planifié                       |
+| **4** | Actions & proactivité — action engine, goals, identity                    | 🔜 planifié                       |
+| **5** | Profondeur cognitive — context fusion, feedback, hallucination guard      | 🔜 planifié                       |
 
 ### Phase 1 — Détail des implémentations
 
@@ -319,16 +320,18 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 ### Phase 2 — Détail des implémentations
 
 - **2.1** — `IntentEngine` (`src/agent/intent/`) : classification dual-path LLM (qwen3:4b) → regex fallback ; `command_classifier.py` tente `POST /agent/classify` avant de tomber sur les regex
+- **2.2** — `AgentModule` enregistré dans `AppModule` ; `AgentController` (`POST /agent/process`, `/agent/classify`) ; `AgentService` (orchestration : classify → emit event → route → update context) ; `IntentRouterService` (routing de 18 `IntentType` vers `MemoryService` / `RagService` / `LlmService`, intents phase 4 graceful "not yet implemented") ; `AgentContextManager` (sessions TTL 30 min, historique 20 messages) ; `IntentType` étendu de 3 à 18 types ; `PENDING_ACTIONS`, `AgentResponse`, `ConversationMessage`, `PendingConfirmation` dans `src/agent/agent.types.ts`
+- **2.3** — Meta-routing dans `AgentService` : CORRECTION (re-classification du texte corrigé + re-routing via `IntentRouterService`, garde anti-récursion), CONFIRMATION (validation TTL + `executePendingAction()` pour MEMORY_ADD / MEMORY_QUERY / RAG_QUESTION), REJECTION (annulation action en attente + mise à jour historique)
 
 ---
 
 ## Stack technique
 
-| Composant | Technologies |
-| --------- | ------------ |
-| Backend | NestJS 11, TypeScript, LangChain, Qdrant JS Client, chrono-node |
-| Frontend | Angular 21, Angular Material, vitest |
-| STT | FastAPI, faster-whisper (Whisper turbo) |
-| Wake listener | Python, OpenWakeWord, PyAudio, Piper TTS |
-| LLM / Embeddings | Ollama (local) |
-| Vector store | Qdrant (Docker) |
+| Composant        | Technologies                                                    |
+| ---------------- | --------------------------------------------------------------- |
+| Backend          | NestJS 11, TypeScript, LangChain, Qdrant JS Client, chrono-node |
+| Frontend         | Angular 21, Angular Material, vitest                            |
+| STT              | FastAPI, faster-whisper (Whisper turbo)                         |
+| Wake listener    | Python, OpenWakeWord, PyAudio, Piper TTS                        |
+| LLM / Embeddings | Ollama (local)                                                  |
+| Vector store     | Qdrant (Docker)                                                 |
