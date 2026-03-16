@@ -151,19 +151,12 @@ export class MemoryService {
         const temporal = this.temporal.parse(q);
         if (temporal?.resolvedDate) {
           const d = new Date(temporal.resolvedDate);
-          const gte = new Date(
-            d.getFullYear(),
-            d.getMonth(),
-            d.getDate(),
-          ).toISOString();
+          const y = d.getUTCFullYear();
+          const mo = d.getUTCMonth();
+          const dy = d.getUTCDate();
+          const gte = new Date(Date.UTC(y, mo, dy, 0, 0, 0, 0)).toISOString();
           const lte = new Date(
-            d.getFullYear(),
-            d.getMonth(),
-            d.getDate(),
-            23,
-            59,
-            59,
-            999,
+            Date.UTC(y, mo, dy, 23, 59, 59, 999),
           ).toISOString();
           dateFilter = { field: 'eventDate', gte, lte };
           temporalExpression = temporal.expression;
@@ -177,10 +170,22 @@ export class MemoryService {
       const { results } = await this.search(q, topK, dateFilter);
 
       // 3. Formater le contexte pour le LLM
+      const formatEventDate = (iso: string) => {
+        const d = new Date(iso);
+        return d.toLocaleString('fr-FR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Europe/Paris',
+        });
+      };
+
       const contexts = results
         .map(
           (r, i) =>
-            `# Souvenir ${i + 1}${r.source ? ` (source: ${r.source})` : ''}${r.eventDate ? ` [le ${r.eventDate}]` : ''}\n${r.text}`,
+            `# Souvenir ${i + 1}${r.source ? ` (source: ${r.source})` : ''}${r.eventDate ? ` [prévu le ${formatEventDate(r.eventDate)}]` : ''}\n${r.text}`,
         )
         .join('\n\n');
 
@@ -188,8 +193,14 @@ export class MemoryService {
         ...new Set(results.map((r) => r.source).filter(Boolean)),
       ] as string[];
 
-      const system =
-        "Tu es Jarvis, un assistant personnel pour la maison. Réponds en français. Utilise PRIORITAIREMENT les informations mémorisées pour répondre. Si aucune information pertinente n'est disponible, dis-le clairement.";
+      const today = new Date().toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'Europe/Paris',
+      });
+      const system = `Tu es Jarvis, un assistant personnel pour la maison. Nous sommes le ${today}. Réponds en français. Utilise PRIORITAIREMENT les informations mémorisées pour répondre. Les dates indiquées dans les souvenirs sont les dates réelles de l'événement — ignore les expressions relatives dans le texte (demain, ce soir…) et fie-toi à la date indiquée entre crochets. Si aucune information pertinente n'est disponible, dis-le clairement.`;
 
       const prompt =
         contexts.length > 0

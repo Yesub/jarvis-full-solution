@@ -60,7 +60,7 @@ def _classify_with_llm(
         resp = requests.post(
             url,
             json={"text": text, "source": "wake_listener"},
-            timeout=100,
+            timeout=120,
         )
         logger.debug("Classification LLM — requête POST %s avec payload: %s", url, {"text": text, "source": "wake_listener"})
         resp.raise_for_status()
@@ -83,18 +83,41 @@ def _classify_with_llm(
 
     except requests.ConnectionError:
         # Expected during Phase 2.1 — endpoint does not yet exist
-        logger.debug(
-            "Backend /agent/classify non disponible — fallback regex."
-        )
+        logger.debug("Backend /agent/classify non disponible — fallback regex.")
+        return None
+    except requests.Timeout:
+        logger.warning("Timeout /agent/classify (%ss) — fallback regex.", 30)
         return None
     except requests.HTTPError as e:
         logger.warning("Erreur HTTP /agent/classify: %s — fallback regex.", e)
         return None
-    except Exception as e:
+    except Exception:
         logger.exception(
-            "Erreur inattendue lors de la classification LLM — fallback regex.", e
+            "Erreur inattendue lors de la classification LLM — fallback regex."
         )
         return None
+
+
+def _classify_with_regex(text: str) -> "tuple[CommandType, str] | None":
+    """
+    Classifie via patterns regex locaux.
+
+    Retourne (CommandType, contenu) si un pattern correspond, None si UNKNOWN.
+    """
+    # Tester les patterns d'ajout (ancrage en début de phrase)
+    for pattern in _ADD_PATTERNS:
+        match = re.match(pattern, text, re.IGNORECASE)
+        if match:
+            content = text[match.end():].strip()
+            if content:
+                return CommandType.ADD, content
+
+    # Tester les patterns de requête (n'importe où dans le texte)
+    for pattern in _QUERY_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return CommandType.QUERY, text
+
+    return None
 
 
 def classify(
@@ -103,8 +126,8 @@ def classify(
     """
     Classifie une transcription vocale Jarvis.
 
-    Si jarvis_api_url est fourni, tente d'abord la classification via le backend
-    NestJS (/agent/classify). En cas d'échec, utilise les patterns regex locaux.
+    Stratégie : regex d'abord (instantané), puis LLM uniquement si regex = UNKNOWN
+    (pour désambiguïser les cas comme "Qu'est-ce qu'on mange demain soir ?").
 
     Retourne (CommandType, contenu):
     - ADD   : contenu = texte sans le préfixe de commande
@@ -112,27 +135,19 @@ def classify(
     - UNKNOWN: contenu = texte complet
     """
     normalized = text.strip()
-    logger.info("Tentative de classification vers JARVIS %s", jarvis_api_url or "(sans classification LLM)")
+    logger.info("Classification de: %s", normalized)
 
-    # Tenter la classification LLM si l'URL backend est disponible
+    # Regex d'abord — instantané, couvre les cas explicites
+    regex_result = _classify_with_regex(normalized)
+    if regex_result is not None:
+        logger.debug("Classification regex: %s", regex_result[0].value)
+        return regex_result
+
+    # Fallback LLM pour les cas ambigus que regex ne couvre pas
     if jarvis_api_url:
+        logger.info("Regex UNKNOWN — tentative classification LLM via %s", jarvis_api_url)
         llm_result = _classify_with_llm(normalized, jarvis_api_url)
         if llm_result is not None:
             return llm_result
-
-    # Fallback regex — miroir de IntentEngine.classifyWithRegex (TypeScript)
-
-    # Tester les patterns d'ajout (ancrage en début de phrase)
-    for pattern in _ADD_PATTERNS:
-        match = re.match(pattern, normalized, re.IGNORECASE)
-        if match:
-            content = normalized[match.end():].strip()
-            if content:
-                return CommandType.ADD, content
-
-    # Tester les patterns de requête (n'importe où dans le texte)
-    for pattern in _QUERY_PATTERNS:
-        if re.search(pattern, normalized, re.IGNORECASE):
-            return CommandType.QUERY, normalized
 
     return CommandType.UNKNOWN, normalized

@@ -84,19 +84,23 @@ export class TemporalService {
       };
     }
 
-    // Date unique → journée complète
-    const startDate = result.start.date();
-    const endDate = new Date(startDate);
-    endDate.setHours(23, 59, 59, 999);
+    // Date unique → journée complète ancrée en UTC
+    const resolved = result.start.date();
+    const y = resolved.getUTCFullYear();
+    const m = resolved.getUTCMonth();
+    const d = resolved.getUTCDate();
+
+    const startOfDay = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+    const endOfDay = new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
 
     this.logger.debug(
-      `Intervalle (journée) trouvé: "${result.text}" → ${startDate.toISOString()} / ${endDate.toISOString()}`,
+      `Intervalle (journée) trouvé: "${result.text}" → ${startOfDay.toISOString()} / ${endOfDay.toISOString()}`,
     );
 
     return {
       expression: result.text,
-      start: startDate.toISOString(),
-      end: endDate.toISOString(),
+      start: startOfDay.toISOString(),
+      end: endOfDay.toISOString(),
     };
   }
 
