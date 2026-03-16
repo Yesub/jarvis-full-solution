@@ -11,6 +11,7 @@ import { LlmModule } from './llm/llm.module';
 import { SttModule } from './stt/stt.module';
 import { MemoryModule } from './memory/memory.module';
 import { AgentModule } from './agent/agent.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { AgentModule } from './agent/agent.module';
     SttModule,
     MemoryModule,
     AgentModule,
+    KnowledgeModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

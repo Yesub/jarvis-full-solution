@@ -60,7 +60,7 @@ def _classify_with_llm(
         resp = requests.post(
             url,
             json={"text": text, "source": "wake_listener"},
-            timeout=120,
+            timeout=240,
         )
         logger.debug("Classification LLM — requête POST %s avec payload: %s", url, {"text": text, "source": "wake_listener"})
         resp.raise_for_status()
@@ -86,7 +86,7 @@ def _classify_with_llm(
         logger.debug("Backend /agent/classify non disponible — fallback regex.")
         return None
     except requests.Timeout:
-        logger.warning("Timeout /agent/classify (%ss) — fallback regex.", 30)
+        logger.warning("Timeout /agent/classify (%ss) — fallback regex.", 240)
         return None
     except requests.HTTPError as e:
         logger.warning("Erreur HTTP /agent/classify: %s — fallback regex.", e)

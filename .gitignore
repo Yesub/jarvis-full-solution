@@ -16,6 +16,9 @@ venv/
 # Qdrant local data
 docker-qdrant/qdrant_storage/
 
+# NEO4j local data
+docker-neo4j/neo4j_data/
+
 # IDE
 .vscode/
 .idea/
