@@ -1,6 +1,8 @@
 """Client TTS local utilisant Piper (neural text-to-speech offline)."""
 
 import logging
+import random
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -62,6 +64,15 @@ class TtsClient:
                 stream.close()
         except Exception:
             logger.exception("Erreur lors de la lecture TTS")
+
+    def speak_random(self, phrases: list[str]) -> None:
+        """Parle une phrase choisie aléatoirement dans la liste."""
+        self.speak(random.choice(phrases))
+
+    def speak_async(self, text: str) -> None:
+        """Lance speak() dans un thread daemon (non-bloquant pour l'appelant)."""
+        t = threading.Thread(target=self.speak, args=(text,), daemon=True)
+        t.start()
 
     # ------------------------------------------------------------------
     # Téléchargement du modèle

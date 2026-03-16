@@ -7,6 +7,7 @@ au serveur STT pour transcription.
 """
 
 import logging
+import random
 import signal
 
 import numpy as np
@@ -53,6 +54,7 @@ def _route_command(
 
     if command_type == CommandType.ADD:
         logger.info("Commande ADD détectée. Contenu à mémoriser: %s", content)
+        tts_client.speak_async(random.choice(["J'enregistre ça.", "Je mémorise.", "Un instant, j'enregistre."]))
         result = jarvis_client.add_memory(content)
         if result:
             logger.info(
@@ -60,13 +62,14 @@ def _route_command(
                 result.get("eventDate", "—"),
                 result.get("expression", "—"),
             )
-            tts_client.speak("C'est noté.")
+            tts_client.speak_random(["C'est noté.", "Bien noté.", "Enregistré.", "Je m'en souviens."])
         else:
             logger.warning("L'ajout en mémoire a échoué (backend injoignable ou erreur).")
-            tts_client.speak("Désolé, je n'ai pas pu enregistrer ça.")
+            tts_client.speak_random(["Désolé, une erreur est survenue.", "Je n'ai pas pu faire ça.", "Quelque chose s'est mal passé."])
 
     elif command_type == CommandType.QUERY:
         logger.info("Commande QUERY détectée. Question: %s", content)
+        tts_client.speak_async(random.choice(["Je cherche dans ma mémoire.", "Laisse-moi réfléchir.", "Je consulte mes souvenirs."]))
         result = jarvis_client.query_memory(content)
         if result:
             answer = result.get("answer", "")
@@ -75,10 +78,11 @@ def _route_command(
                 answer,
                 result.get("temporalContext", "aucun"),
             )
+            tts_client.speak_random(["Voilà.", "Bien sûr.", "Je réponds."])
             tts_client.speak(answer)
         else:
             logger.warning("La requête mémoire a échoué (backend injoignable ou erreur).")
-            tts_client.speak("Désolé, je n'ai pas pu répondre.")
+            tts_client.speak_random(["Désolé, une erreur est survenue.", "Je n'ai pas pu faire ça.", "Quelque chose s'est mal passé."])
 
     else:
         logger.info("Commande non reconnue (UNKNOWN). Texte ignoré: %s", text)
@@ -131,6 +135,7 @@ def main():
                         model_name,
                         score,
                     )
+                    tts_client.speak(random.choice(["Je t'écoute.", "À l'écoute.", "Dis-moi.", "Oui ?", "Je suis là."]))
 
                     # Enregistrer jusqu'au silence
                     wav_bytes = record_until_silence(stream, config)
@@ -138,6 +143,7 @@ def main():
                         "Enregistrement termine (%d octets). Envoi au STT...",
                         len(wav_bytes),
                     )
+                    tts_client.speak_async(random.choice(["Analyse en cours.", "Un instant.", "Je traite ça.", "Je réfléchis."]))
 
                     # Transcrire
                     text = stt_client.transcribe(wav_bytes)
