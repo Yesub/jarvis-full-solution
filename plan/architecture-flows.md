@@ -20,7 +20,7 @@ graph TB
         AgentCtrl["Agent Controller\n/agent/process\n/agent/process/stream\n/agent/classify"]
 
         subgraph Services["Services internes"]
-            OllamaSvc["OllamaService\nsmall / medium / large"]
+            LlamaCppSvc["LlamaCppService\nnode-llama-cpp\nsingle GGUF model"]
             VectorSvc["VectorstoreService\ndual-collection"]
             MemSvc["MemoryService"]
             TempSvc["TemporalService\nparse / parseInterval\ndetectRecurrence / detectDirection"]
@@ -33,7 +33,6 @@ graph TB
     end
 
     subgraph External["Services externes"]
-        Ollama["Ollama :11434\nLLM + Embeddings"]
         Qdrant["Qdrant :6333\nvector store"]
         STTServer["STT Server :8300\nWhisper turbo"]
     end
@@ -56,11 +55,11 @@ graph TB
     ApiSvc -->|"HTTP / SSE"| AgentCtrl
     SpeechSvc -->|"WebM audio"| STTCtrl
 
-    RAGCtrl --> OllamaSvc
+    RAGCtrl --> LlamaCppSvc
     RAGCtrl --> VectorSvc
-    LLMCtrl --> OllamaSvc
+    LLMCtrl --> LlamaCppSvc
     MemCtrl --> MemSvc
-    MemSvc --> OllamaSvc
+    MemSvc --> LlamaCppSvc
     MemSvc --> VectorSvc
     MemSvc --> TempSvc
     MemSvc -->|"emit events"| EventBus
@@ -70,10 +69,9 @@ graph TB
     AgentSvc --> RouterSvc
     AgentSvc --> CtxMgr
     RouterSvc --> MemSvc
-    RouterSvc --> OllamaSvc
-    IntentEng -->|"generateWith('small')"| OllamaSvc
+    RouterSvc --> LlamaCppSvc
+    IntentEng -->|"generateWith('large')"| LlamaCppSvc
 
-    OllamaSvc --> Ollama
     VectorSvc --> Qdrant
 
     Mic --> OWW
@@ -94,7 +92,7 @@ sequenceDiagram
     participant UI as Angular UI
     participant NestJS as NestJS :3000
     participant LC as LangChain
-    participant Ollama as Ollama :11434
+    participant LlamaCpp as llama.cpp (in-process)
     participant Qdrant as Qdrant :6333
 
     User->>UI: Upload PDF/TXT/MD (max 50 MB)
@@ -104,8 +102,8 @@ sequenceDiagram
     NestJS->>LC: RecursiveCharacterTextSplitter\n(chunk 1000, overlap 150)
     LC-->>NestJS: chunks[]
     loop pour chaque chunk
-        NestJS->>Ollama: POST /api/embed (qwen3-embedding:8b)
-        Ollama-->>NestJS: vecteur dense 4096 dims
+        NestJS->>LlamaCpp: embed(chunk)
+        LlamaCpp-->>NestJS: vecteur dense
         NestJS->>NestJS: TokenizerService.tokenize(chunk)\n→ sparse vector { indices, values }
         NestJS->>Qdrant: upsert → domainknowledge\n{ default: dense, bm25: sparse }\n{ source, chunkIndex, text }
     end
@@ -121,13 +119,13 @@ sequenceDiagram
     actor User
     participant UI as Angular UI
     participant NestJS as NestJS :3000
-    participant Ollama as Ollama :11434
+    participant LlamaCpp as llama.cpp (in-process)
     participant Qdrant as Qdrant :6333
 
     User->>UI: Question texte
     UI->>NestJS: POST /rag/ask/stream
-    NestJS->>Ollama: embed(question) → qwen3-embedding:8b
-    Ollama-->>NestJS: vecteur question
+    NestJS->>LlamaCpp: embed(question)
+    LlamaCpp-->>NestJS: vecteur question
     alt SEARCH_MODE=vector (défaut)
         NestJS->>Qdrant: search domainknowledge (cosine, top-K=5)
     else SEARCH_MODE=hybrid
@@ -136,9 +134,9 @@ sequenceDiagram
     end
     Qdrant-->>NestJS: chunks pertinents + scores
     NestJS-->>UI: SSE event: metadata\n{ sources, topK }
-    NestJS->>Ollama: generate(prompt+contexte) → large model\nqwen3.5:9b (stream)
+    NestJS->>LlamaCpp: generateStream(prompt+contexte)
     loop tokens streamés
-        Ollama-->>NestJS: token
+        LlamaCpp-->>NestJS: token
         NestJS-->>UI: SSE data: token
     end
     UI->>User: Réponse affichée en temps réel
@@ -158,7 +156,7 @@ sequenceDiagram
     participant CLS as CommandClassifier
     participant NestJS as NestJS :3000
     participant Temp as TemporalService
-    participant Ollama as Ollama :11434
+    participant LlamaCpp as llama.cpp (in-process)
     participant Qdrant as Qdrant :6333
     participant TTS as Piper TTS
     participant EventBus as EventEmitter2
@@ -173,8 +171,8 @@ sequenceDiagram
     CLS->>NestJS: POST /memory/add { text }
     NestJS->>Temp: parse(text) → eventDate?
     Temp-->>NestJS: TemporalResult | null
-    NestJS->>Ollama: embed(text) → qwen3-embedding:8b
-    Ollama-->>NestJS: vecteur
+    NestJS->>LlamaCpp: embed(text)
+    LlamaCpp-->>NestJS: vecteur
     NestJS->>Qdrant: upsert → jarvis_for_home\n{ text, addedAt, eventDate?, source }
     NestJS->>EventBus: emit MEMORY_ADDED\n{ id, source, eventDate, text }
     NestJS-->>CLS: { id, addedAt }
@@ -196,7 +194,7 @@ sequenceDiagram
     participant CLS as CommandClassifier
     participant NestJS as NestJS :3000
     participant Temp as TemporalService
-    participant Ollama as Ollama :11434
+    participant LlamaCpp as llama.cpp (in-process)
     participant Qdrant as Qdrant :6333
     participant TTS as Piper TTS
     participant EventBus as EventEmitter2
@@ -210,13 +208,13 @@ sequenceDiagram
     CLS->>NestJS: POST /memory/query { question }
     NestJS->>Temp: parse(question) → temporalContext?
     Temp-->>NestJS: date extraite (ex: "ce soir" → ISO)
-    NestJS->>Ollama: embed(question) → qwen3-embedding:8b
-    Ollama-->>NestJS: vecteur question
+    NestJS->>LlamaCpp: embed(question)
+    LlamaCpp-->>NestJS: vecteur question
     NestJS->>Qdrant: search jarvis_for_home\n(filtre eventDate si date extraite)
     Qdrant-->>NestJS: souvenirs pertinents
     NestJS->>EventBus: emit MEMORY_QUERIED
-    NestJS->>Ollama: generate(contexte+souvenirs) → medium model\nmistral:latest
-    Ollama-->>NestJS: réponse en français
+    NestJS->>LlamaCpp: generate(contexte+souvenirs)
+    LlamaCpp-->>NestJS: réponse en français
     NestJS-->>CLS: { answer, sources, topK, temporalContext? }
     CLS->>TTS: réponse vocale
     TTS->>User: réponse parlée
@@ -224,17 +222,13 @@ sequenceDiagram
 
 ---
 
-## 6. Routage multi-modèle Ollama
+## 6. Inférence locale llama.cpp — single-model
 
 ```mermaid
 graph LR
-    Call["Appel OllamaService"]
-    Call -->|"resolveModel('small')"| SM["qwen3:4b\nOLLAMA_LLM_SMALL_MODEL\nClassification / intention"]
-    Call -->|"resolveModel('medium')\nou generate() direct"| MM["mistral:latest\nOLLAMA_LLM_MODEL\nMémoire / résumés"]
-    Call -->|"resolveModel('large')"| LM["qwen3.5:9b\nOLLAMA_LLM_LARGE_MODEL\nRAG / raisonnement"]
-    SM --> Ollama["Ollama :11434\nPOST /api/generate"]
-    MM --> Ollama
-    LM --> Ollama
+    Call["Appel LlamaCppService"]
+    Call -->|"generateWith('small'|'medium'|'large')\ndélègue au modèle chargé"| Model["Modèle GGUF chargé\nmistral-7b-instruct.gguf\nin-process (node-llama-cpp)"]
+    Call -->|"embed(texts[])"| EmbedModel["Modèle embedding GGUF\nbge-small-en-v1.5.gguf\nin-process"]
 ```
 
 ---

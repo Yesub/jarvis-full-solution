@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { OllamaModule } from '../ollama/ollama.module';
+import { LlamaCppModule } from '../llama-cpp/llama-cpp.module';
 import { MemoryModule } from '../memory/memory.module';
 import { RagModule } from '../rag/rag.module';
 import { LlmModule } from '../llm/llm.module';
@@ -10,9 +10,14 @@ import { IntentRouterService } from './router/intent-router.service';
 import { AgentContextManager } from './context/agent-context.manager';
 
 @Module({
-  imports: [OllamaModule, MemoryModule, RagModule, LlmModule],
+  imports: [LlamaCppModule, MemoryModule, RagModule, LlmModule],
   controllers: [AgentController],
-  providers: [AgentService, IntentEngine, IntentRouterService, AgentContextManager],
+  providers: [
+    AgentService,
+    IntentEngine,
+    IntentRouterService,
+    AgentContextManager,
+  ],
   exports: [AgentService],
 })
 export class AgentModule {}

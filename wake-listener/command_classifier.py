@@ -56,16 +56,23 @@ def _classify_with_llm(
     """
     url = f"{jarvis_api_url.rstrip('/')}/agent/classify"
     try:
+        logger.info("Tentative de classification LLM via %s", url)
         resp = requests.post(
             url,
             json={"text": text, "source": "wake_listener"},
-            timeout=10,
+            timeout=100,
         )
+        logger.debug("Classification LLM — requête POST %s avec payload: %s", url, {"text": text, "source": "wake_listener"})
         resp.raise_for_status()
+        logger.debug("Classification LLM — réponse reçue: %s", resp.json())
         data = resp.json()
 
         intent_raw = data.get("intent", "").upper()
         content = data.get("content", text)
+
+        logger.debug(
+            "Classification LLM réussie. intent=%s content=%s", intent_raw, content
+        )
 
         if intent_raw == "ADD":
             return CommandType.ADD, content
@@ -83,9 +90,9 @@ def _classify_with_llm(
     except requests.HTTPError as e:
         logger.warning("Erreur HTTP /agent/classify: %s — fallback regex.", e)
         return None
-    except Exception:
+    except Exception as e:
         logger.exception(
-            "Erreur inattendue lors de la classification LLM — fallback regex."
+            "Erreur inattendue lors de la classification LLM — fallback regex.", e
         )
         return None
 
@@ -105,6 +112,7 @@ def classify(
     - UNKNOWN: contenu = texte complet
     """
     normalized = text.strip()
+    logger.info("Tentative de classification vers JARVIS %s", jarvis_api_url or "(sans classification LLM)")
 
     # Tenter la classification LLM si l'URL backend est disponible
     if jarvis_api_url:

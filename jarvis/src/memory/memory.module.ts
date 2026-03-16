@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { OllamaModule } from '../ollama/ollama.module';
+import { LlamaCppModule } from '../llama-cpp/llama-cpp.module';
 import { VectorstoreModule } from '../vectorstore/vectorstore.module';
 import { TemporalModule } from '../temporal/temporal.module';
 import { MemoryService } from './memory.service';
@@ -8,7 +8,7 @@ import { MemoryEventsListener } from './memory.events.listener';
 import { MemoryScoringService } from './memory-scoring.service';
 
 @Module({
-  imports: [OllamaModule, VectorstoreModule, TemporalModule],
+  imports: [LlamaCppModule, VectorstoreModule, TemporalModule],
   providers: [MemoryService, MemoryEventsListener, MemoryScoringService],
   controllers: [MemoryController],
   exports: [MemoryService],

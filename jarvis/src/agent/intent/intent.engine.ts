@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OllamaService } from '../../ollama/ollama.service';
+import { LlamaCppService } from '../../llama-cpp/llama-cpp.service';
 import { CLASSIFICATION_SYSTEM_PROMPT } from './classification-prompt';
 import { ExtractedEntities, IntentResult, IntentType } from './intent.types';
 
@@ -34,7 +34,7 @@ export class IntentEngine {
     /\bj['']?ai[-\s](?:prévu|quelque)\b/i,
   ];
 
-  constructor(private readonly ollama: OllamaService) {}
+  constructor(private readonly ollama: LlamaCppService) {}
 
   /**
    * Classify a French voice command. Attempts LLM classification first,
@@ -46,12 +46,25 @@ export class IntentEngine {
       return this.unknownResult(normalized, 1.0);
     }
 
+    const CONFIDENCE_THRESHOLD = 0.75;
+
     try {
-      const result = await this.classifyWithLLM(normalized);
+      const llmResult = await this.classifyWithLLM(normalized);
       this.logger.debug(
-        `LLM classified "${normalized.slice(0, 60)}" → ${result.primary} (${result.confidence})`,
+        `LLM classified "${normalized.slice(0, 60)}" → ${llmResult.primary} (${llmResult.confidence})`,
       );
-      return result;
+
+      if (llmResult.confidence < CONFIDENCE_THRESHOLD) {
+        const override = this.tryRegexOverride(normalized, llmResult);
+        if (override) {
+          this.logger.debug(
+            `Low-confidence LLM result overridden by regex (${llmResult.primary} ${llmResult.confidence} → ${override.primary} 1.0)`,
+          );
+          return override;
+        }
+      }
+
+      return llmResult;
     } catch (error) {
       this.logger.warn(
         `LLM classification failed, falling back to regex: ${(error as Error).message}`,
@@ -67,7 +80,7 @@ export class IntentEngine {
   async classifyWithLLM(text: string): Promise<IntentResult> {
     const prompt = `Texte à classifier:\n${text}`;
     const raw = await this.ollama.generateWith(
-      'medium', // 'small',
+      'large',
       prompt,
       CLASSIFICATION_SYSTEM_PROMPT,
     );
@@ -82,11 +95,18 @@ export class IntentEngine {
   classifyWithRegex(text: string): IntentResult {
     const normalized = text.trim();
 
+    this.logger.debug(
+      `Classification regex fallback for "${normalized.slice(0, 60)}"`,
+    );
+
     for (const pattern of IntentEngine.ADD_PATTERNS) {
       const match = pattern.exec(normalized);
       if (match) {
         const extractedContent = normalized.slice(match[0].length).trim();
         if (extractedContent) {
+          this.logger.debug(
+            `Classification regex matched ADD pattern "${pattern}" with content: "${extractedContent.slice(0, 60)}"`,
+          );
           return {
             primary: IntentType.MEMORY_ADD,
             confidence: 1.0,
@@ -100,6 +120,9 @@ export class IntentEngine {
 
     for (const pattern of IntentEngine.QUERY_PATTERNS) {
       if (pattern.test(normalized)) {
+        this.logger.debug(
+          `Classification regex matched QUERY pattern "${pattern}" with content: "${normalized.slice(0, 60)}"`,
+        );
         return {
           primary: IntentType.MEMORY_QUERY,
           confidence: 1.0,
@@ -246,6 +269,41 @@ export class IntentEngine {
       task: str(raw['task']),
       frequency: str(raw['frequency']),
     };
+  }
+
+  private tryRegexOverride(
+    text: string,
+    llmResult: IntentResult,
+  ): IntentResult | null {
+    for (const pattern of IntentEngine.ADD_PATTERNS) {
+      const match = pattern.exec(text);
+      if (match) {
+        const extractedContent = text.slice(match[0].length).trim();
+        if (extractedContent) {
+          return {
+            primary: IntentType.MEMORY_ADD,
+            confidence: 1.0,
+            extractedContent,
+            entities: llmResult.entities,
+            priority: llmResult.priority,
+          };
+        }
+      }
+    }
+
+    for (const pattern of IntentEngine.QUERY_PATTERNS) {
+      if (pattern.test(text)) {
+        return {
+          primary: IntentType.MEMORY_QUERY,
+          confidence: 1.0,
+          extractedContent: text,
+          entities: llmResult.entities,
+          priority: llmResult.priority,
+        };
+      }
+    }
+
+    return null;
   }
 
   private unknownResult(text: string, confidence: number): IntentResult {

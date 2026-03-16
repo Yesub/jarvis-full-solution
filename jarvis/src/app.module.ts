@@ -4,7 +4,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HealthController } from './health/health.controller';
-import { OllamaModule } from './ollama/ollama.module';
+import { LlamaCppModule } from './llama-cpp/llama-cpp.module';
 import { VectorstoreModule } from './vectorstore/vectorstore.module';
 import { RagModule } from './rag/rag.module';
 import { LlmModule } from './llm/llm.module';
@@ -16,7 +16,7 @@ import { AgentModule } from './agent/agent.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     EventEmitterModule.forRoot({ wildcard: true }),
-    OllamaModule,
+    LlamaCppModule,
     VectorstoreModule,
     RagModule,
     LlmModule,

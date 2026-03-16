@@ -9,7 +9,7 @@ import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
-import { OllamaService } from '../ollama/ollama.service';
+import { LlamaCppService } from '../llama-cpp/llama-cpp.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
 import { TokenizerService } from './tokenizer.service';
 import type { RagPayload } from './rag.types';
@@ -25,7 +25,7 @@ export class RagService {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly ollama: OllamaService,
+    private readonly ollama: LlamaCppService,
     private readonly vs: VectorstoreService,
     private readonly tokenizer: TokenizerService,
   ) {

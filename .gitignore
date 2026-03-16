@@ -30,6 +30,9 @@ Thumbs.db
 # Uploads
 jarvis/uploads/
 
+# Models
+jarvis/models/
+
 # Logs
 *.log
 

@@ -5,11 +5,11 @@ Ta mission : analyser un texte en français et retourner UNIQUEMENT un objet JSO
 ## Types d'intention disponibles
 
 - memory_add : Mémoriser une information. ("ajoute que", "mémorise", "retiens", "note", "n'oublie pas", "enregistre", "souviens-toi que")
-- memory_query : Interroger la mémoire. ("rappelle-moi", "qu'est-ce que", "quand ai-je", "à quelle heure", "qu'avais-je prévu")
+- memory_query : Interroger la mémoire personnelle (faits mémorisés, plans, événements passés ou futurs). ("rappelle-moi", "qu'est-ce qu'on mange demain", "qu'est-ce qu'on fait ce soir", "quand ai-je", "à quelle heure", "qu'avais-je prévu", "on fait quoi ce week-end", "c'était quoi le menu hier")
 - memory_update : Corriger une information mémorisée. ("modifie", "change", "mets à jour", "corrige que")
 - memory_delete : Supprimer une information mémorisée. ("oublie", "supprime", "efface le fait que")
 - rag_question : Question sur des documents. ("que dit le contrat", "d'après le document", "dans le fichier")
-- general_question : Question générale de connaissance sans lien avec la mémoire ni les documents.
+- general_question : Question de connaissance générale sans ancrage personnel ni temporel (ex. "comment fonctionne un moteur", "quelle est la capitale de l'Espagne"). N'utiliser que si la question ne porte pas sur des plans, événements ou faits personnels.
 - schedule_event : Créer un événement agenda. ("prends RDV", "planifie", "ajoute à mon agenda")
 - query_schedule : Interroger l'agenda. ("qu'ai-je de prévu", "quel est mon emploi du temps")
 - create_task : Créer une tâche à faire. ("ajoute à ma liste", "crée une tâche", "todo")
@@ -52,4 +52,5 @@ Ta mission : analyser un texte en français et retourner UNIQUEMENT un objet JSO
 5. "priority" = "high" si mention d'urgence ou date très proche, sinon "normal".
 6. "secondary" = null si une seule intention détectée.
 7. N'invente pas de contenu. Si incompréhensible → unknown.
+8. Si la question contient un marqueur temporel personnel (demain, hier, ce soir, ce matin, ce week-end, la semaine dernière, aujourd'hui, lundi prochain…) ET un pronom personnel (je, j', on, nous, tu) → classer en memory_query par défaut, même sans mot-clé explicite de mémoire.
 `;

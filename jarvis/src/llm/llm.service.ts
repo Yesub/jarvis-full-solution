@@ -1,15 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { OllamaService } from '../ollama/ollama.service';
+import { LlamaCppService } from '../llama-cpp/llama-cpp.service';
 
 @Injectable()
 export class LlmService {
-  constructor(private readonly ollama: OllamaService) {}
+  constructor(private readonly llama: LlamaCppService) {}
 
   async ask(prompt: string): Promise<string> {
-    return this.ollama.generate(prompt);
+    return this.llama.generate(prompt);
   }
 
   async *askStream(prompt: string): AsyncGenerator<string> {
-    yield* this.ollama.generateStream(prompt);
+    yield* this.llama.generateStream(prompt);
   }
 }

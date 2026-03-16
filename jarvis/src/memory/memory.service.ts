@@ -6,7 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { OllamaService } from '../ollama/ollama.service';
+import { LlamaCppService } from '../llama-cpp/llama-cpp.service';
 import { VectorstoreService } from '../vectorstore/vectorstore.service';
 import { TemporalService } from '../temporal/temporal.service';
 import { MemoryScoringService } from './memory-scoring.service';
@@ -25,7 +25,7 @@ export class MemoryService {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly ollama: OllamaService,
+    private readonly ollama: LlamaCppService,
     private readonly vs: VectorstoreService,
     private readonly temporal: TemporalService,
     private readonly eventEmitter: EventEmitter2,

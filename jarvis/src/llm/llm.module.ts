@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { OllamaModule } from '../ollama/ollama.module';
+import { LlamaCppModule } from '../llama-cpp/llama-cpp.module';
 import { LlmService } from './llm.service';
 import { LlmController } from './llm.controller';
 
 @Module({
-  imports: [OllamaModule],
+  imports: [LlamaCppModule],
   providers: [LlmService],
   controllers: [LlmController],
   exports: [LlmService],

@@ -29,9 +29,9 @@ jarvis-full-solution/
 ### Flux de communication
 
 ```text
-Angular (4200) ──HTTP/SSE──► NestJS (3000) ──► Ollama (11434)    [LLM + Embeddings]
-                                            ──► Qdrant (6333)    [Recherche vectorielle]
-                                            ──► STT Server (8300) [Transcription audio]
+Angular (4200) ──HTTP/SSE──► NestJS (3000) ──► llama.cpp (in-process) [LLM + Embeddings]
+                                            ──► Qdrant (6333)          [Recherche vectorielle]
+                                            ──► STT Server (8300)      [Transcription audio]
 
 Wake Listener (micro) ──► STT Server (8300) [Transcription]
                       ──► NestJS (3000)     [/memory/add, /memory/query]
@@ -43,7 +43,7 @@ Wake Listener (micro) ──► STT Server (8300) [Transcription]
 
 ```text
 Upload (PDF/TXT/MD) → LangChain parsing → chunking (1000 chars, overlap 150)
-  → embeddings Ollama → Qdrant (domainknowledge)
+  → embeddings llama.cpp → Qdrant (domainknowledge)
 ```
 
 #### RAG Q&A (streaming)
@@ -68,23 +68,22 @@ Microphone → "Hey Jarvis" (OpenWakeWord) → enregistrement silence RMS → WA
 
 ## Prérequis
 
-| Outil                        | Version | Usage                             |
-| ---------------------------- | ------- | --------------------------------- |
-| Node.js                      | 20+     | Backend NestJS + Frontend Angular |
-| Python                       | 3.10+   | STT server + Wake listener        |
-| Docker                       | -       | Qdrant (base vectorielle)         |
-| [Ollama](https://ollama.com) | latest  | LLM local + embeddings            |
+| Outil   | Version | Usage                             |
+| ------- | ------- | --------------------------------- |
+| Node.js | 20+     | Backend NestJS + Frontend Angular |
+| Python  | 3.10+   | STT server + Wake listener        |
+| Docker  | -       | Qdrant (base vectorielle)         |
 
-### Modèles Ollama requis
+### Modèles GGUF requis
 
-```bash
-ollama pull qwen3-embedding:8b   # embeddings (4096 dims)
-ollama pull qwen3:4b             # LLM small (classification, intention)
-ollama pull mistral:latest       # LLM medium (mémoire, résumés)
-ollama pull qwen3.5:9b          # LLM large (RAG, raisonnement)
-```
+Télécharger les fichiers GGUF dans `jarvis/models/` :
 
-> Les trois modèles LLM sont configurables via `.env`. Seul l'embed model est requis pour le RAG de base.
+| Fichier                    | Taille  | Usage         | Source recommandée                                                                                                   |
+| -------------------------- | ------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `mistral-7b-instruct.gguf` | ~4.3 GB | LLM principal | [bartowski/Mistral-7B-Instruct-v0.3-GGUF](https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF) (Q4_K_M)   |
+| `bge-small-en-v1.5.gguf`   | ~134 MB | Embeddings    | [CompendiumLabs/bge-small-en-v1.5-gguf](https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf)                |
+
+> Alternative embedding : `nomic-embed-text-v1.5.gguf` (~146 MB). Configurable via `LLAMA_CPP_EMBED_MODEL_PATH`.
 
 ---
 
@@ -188,13 +187,17 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 - Réponses vocales via Piper TTS local (modèle `fr_FR-siwis-medium`)
 - Téléchargement automatique du modèle au premier démarrage
 
-### Multi-modèle Ollama
+### Inférence locale llama.cpp
 
-| Taille | Modèle           | Usage                      |
-| ------ | ---------------- | -------------------------- |
-| small  | `qwen3:4b`       | Classification, intention  |
-| medium | `mistral:latest` | Mémoire, résumés           |
-| large  | `qwen3.5:9b`     | RAG, raisonnement complexe |
+Un seul modèle GGUF chargé en mémoire. Les appels `generateWith('small'|'medium'|'large')` délèguent tous au même modèle — pas de routage par taille.
+
+| Paramètre                | Défaut | Description            |
+| ------------------------ | ------ | ---------------------- |
+| `LLAMA_CPP_GPU_LAYERS`   | `30`   | Couches offloadées GPU |
+| `LLAMA_CPP_CONTEXT_SIZE` | `2048` | Taille du contexte     |
+| `LLAMA_CPP_TEMPERATURE`  | `0.7`  | Température            |
+
+> Pour désactiver le GPU (CPU uniquement) : `LLAMA_CPP_GPU_LAYERS=0`
 
 ---
 
@@ -253,12 +256,12 @@ La doc Swagger du backend est sur [http://localhost:3000/api](http://localhost:3
 # CORS
 CORS_ORIGINS=http://localhost:4200
 
-# Ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_LLM_SMALL_MODEL=qwen3:4b
-OLLAMA_LLM_MODEL=mistral:latest
-OLLAMA_LLM_LARGE_MODEL=qwen3.5:9b
-OLLAMA_EMBED_MODEL=qwen3-embedding:8b
+# llama.cpp (inférence locale)
+LLAMA_CPP_LLM_MODEL_PATH=./models/mistral-7b-instruct.gguf
+LLAMA_CPP_EMBED_MODEL_PATH=./models/bge-small-en-v1.5.gguf
+LLAMA_CPP_GPU_LAYERS=30
+LLAMA_CPP_CONTEXT_SIZE=2048
+LLAMA_CPP_TEMPERATURE=0.7
 
 # Qdrant
 QDRANTURL=http://127.0.0.1:6333
@@ -319,7 +322,7 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 
 - **1.1** — `MemoryPayload` séparé de `RagPayload` (`src/memory/memory.types.ts`)
 - **1.2** — Event bus NestJS EventEmitter2 avec `MemoryEventsListener` (MEMORY_ADDED, MEMORY_SEARCHED, MEMORY_QUERIED)
-- **1.3** — Routage multi-modèle Ollama via `resolveModel('small'|'medium'|'large')`
+- **1.3** — Routage LLM par taille via `LlamaCppService.generateWith('small'|'medium'|'large')` (single-model GGUF)
 - **1.4** — Types `AgentContext`, `AgentResponse`, `ConversationMessage` dans `src/agent/agent.types.ts`
 - **1.5** — `TemporalService` enrichi : `parseInterval()` (plages de dates), `detectRecurrence()` (patterns récurrents), `detectDirection()` (past/future) ; `MemoryService.query()` filtre automatiquement par intervalle `eventDate`
 
@@ -345,5 +348,5 @@ Le développement suit un plan en 5 phases. Voir [plan/SUMMARY.md](plan/SUMMARY.
 | Frontend         | Angular 21, Angular Material, vitest                            |
 | STT              | FastAPI, faster-whisper (Whisper turbo)                         |
 | Wake listener    | Python, OpenWakeWord, PyAudio, Piper TTS                        |
-| LLM / Embeddings | Ollama (local)                                                  |
+| LLM / Embeddings | llama.cpp via node-llama-cpp (GGUF in-process)                  |
 | Vector store     | Qdrant (Docker)                                                 |

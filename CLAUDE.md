@@ -16,9 +16,9 @@ jarvis-full-solution/
 ### Flux de communication
 
 ```
-Angular (4200) ──HTTP/CORS──► NestJS (3000) ──► Ollama (11434)  [LLM + Embeddings]
-                                             ──► Qdrant (6333)   [Recherche vectorielle]
-                                             ──► STT Server (8300) [Transcription audio]
+Angular (4200) ──HTTP/CORS──► NestJS (3000) ──► llama.cpp (in-process) [LLM + Embeddings]
+                                             ──► Qdrant (6333)          [Recherche vectorielle]
+                                             ──► STT Server (8300)      [Transcription audio]
 
 Wake Listener (micro local) ──► STT Server (8300) [Transcription audio]
                             ──► NestJS (3000)      [Mémoire : /memory/add, /memory/query]
@@ -40,7 +40,7 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 | STT                 | `POST /stt/transcribe` (max 25 MB)                            | Proxy vers le serveur Python Whisper (fichier temp supprimé après transcription)                                                                                                                               |
 | HealthController    | `GET /health`                                                 | Check de santé (controller standalone dans AppModule, pas de module dédié)                                                                                                                                     |
 | ConfigModule        | (global)                                                      | Chargement `.env` via `@nestjs/config`                                                                                                                                                                         |
-| Ollama              | (service interne)                                             | Client Ollama multi-modèle : `embed()`, `generate()`, `generateWith(size)` avec routage small/medium/large                                                                                                     |
+| LlamaCpp            | (service interne)                                             | Inférence LLM locale via `node-llama-cpp` : `embed()`, `generate()`, `generateWith(size)` — single-model GGUF, pas de démon externe                                                                            |
 | Agent               | `POST /agent/process`, `POST /agent/classify`                 | Orchestration complète : classification → routing → réponse contextuelle. `AgentService` + `IntentRouterService` + `AgentContextManager`. Module enregistré dans AppModule (Phase 2.2)                         |
 | Vectorstore         | (service interne)                                             | Client Qdrant, gère deux collections : `domainknowledge` (documents, sparse BM25 Phase 3.2) et `jarvis_for_home` (mémoire)                                                                                      |
 | Temporal            | (service interne)                                             | Extraction d'expressions temporelles françaises via chrono-node (`chrono.fr.parse`)                                                                                                                            |
@@ -49,7 +49,7 @@ Global : `AllExceptionsFilter` (erreurs structurées JSON), `LoggingInterceptor`
 
 #### Module Memory (`src/memory/`)
 
-- **MemoryService** : coordonne Ollama (embeddings + génération), VectorstoreService (collection `jarvis_for_home`), TemporalService et MemoryScoringService (Phase 3.1)
+- **MemoryService** : coordonne LlamaCppService (embeddings + génération), VectorstoreService (collection `jarvis_for_home`), TemporalService et MemoryScoringService (Phase 3.1)
   - `add(text, source?, contextType?)` : extrait la date d'événement via TemporalService, calcule `importance` via `MemoryScoringService.computeImportance()`, embed le texte, stocke dans Qdrant avec `addedAt`, `eventDate?`, `importance` et `accessCount: 0`
   - `search(query, topK?, dateFilter?)` : recherche sémantique avec filtre de plage de dates optionnel (`eventDate` ou `addedAt`) ; re-rank les résultats par `vectorScore × importance` (fallback `0.3` pour anciens souvenirs) ; expose `importance` et `accessCount` dans chaque résultat
   - `query(question, topK?)` : Q&A complet — utilise `parseInterval()` en priorité pour les plages de dates (ex. "la semaine dernière"), sinon `parse()` étendu au jour entier ; filtre auto sur `eventDate`, génère une réponse LLM en français. Retourne `{ answer, sources, topK, temporalContext? }`
@@ -73,17 +73,28 @@ NestJS EventEmitter2 configuré avec `wildcard: true` dans AppModule. Les évén
 | `MEMORY_SEARCHED` | `{ query, resultCount, topK, resultIds[] }`    | Log + incrémente `accessCount` et recalcule `importance` pour chaque point retourné (fire-and-forget) |
 | `MEMORY_QUERIED`  | `{ question, topK, sourceIds }`                | Log de la question et des IDs sources                                                                 |
 
-#### Module Ollama (`src/ollama/`)
+#### Module LlamaCpp (`src/llama-cpp/`)
 
-Routage multi-modèle via `resolveModel(size: 'small' | 'medium' | 'large')` :
+Inférence LLM locale directe via `node-llama-cpp` — remplace OllamaService (plus de démon externe ni de couche HTTP). Latence réduite de 50–70 % vs Ollama HTTP.
 
-| Taille   | Variable env             | Modèle par défaut | Usage                                     |
-| -------- | ------------------------ | ----------------- | ----------------------------------------- |
-| `small`  | `OLLAMA_LLM_SMALL_MODEL` | `qwen3:4b`        | Classification, intention, tâches légères |
-| `medium` | `OLLAMA_LLM_MODEL`       | `mistral:latest`  | Génération mémoire, résumés               |
-| `large`  | `OLLAMA_LLM_LARGE_MODEL` | `qwen3.5:9b`      | RAG, raisonnement complexe                |
+**Architecture single-model** : un seul fichier GGUF chargé en mémoire. `generateWith('small'|'medium'|'large')` délègue toujours au même modèle chargé (pas de routage par taille).
 
-Méthodes disponibles : `generate(prompt)` / `generateStream(prompt)` (modèle medium par défaut), `generateWith(size, prompt)` / `generateStreamWith(size, prompt)` (taille explicite).
+| Variable env                  | Défaut                                | Rôle                           |
+| ----------------------------- | ------------------------------------- | ------------------------------ |
+| `LLAMA_CPP_LLM_MODEL_PATH`    | `./models/mistral-7b-instruct.gguf`   | Chemin modèle LLM (GGUF)       |
+| `LLAMA_CPP_EMBED_MODEL_PATH`  | `./models/bge-small-en-v1.5.gguf`     | Chemin modèle embedding (GGUF) |
+| `LLAMA_CPP_GPU_LAYERS`        | `30`                                  | Couches GPU offloading         |
+| `LLAMA_CPP_CONTEXT_SIZE`      | `2048`                                | Taille du contexte             |
+| `LLAMA_CPP_TEMPERATURE`       | `0.7`                                 | Température de génération      |
+
+**Modèles GGUF requis** (à placer dans `jarvis/models/`) :
+
+- LLM : `mistral-7b-instruct.gguf` (~4.3 GB, Q4_K_M recommandé)
+- Embedding : `bge-small-en-v1.5.gguf` (~134 MB) ou `nomic-embed-text-v1.5.gguf` (~146 MB)
+
+Méthodes publiques (compatibles avec l'ancienne API OllamaService) : `embed(texts[])`, `generate(prompt, system?)`, `generateStream(prompt, system?)`, `generateWith(size, prompt, system?)`, `generateStreamWith(size, prompt, system?)`.
+
+**Note ESM** : `node-llama-cpp` est un module ESM pur — import dynamique `import()` dans `onModuleInit()` pour compatibilité CommonJS/NestJS. Pool de 4 séquences de contexte pour les appels concurrents.
 
 #### Module Agent (`src/agent/`)
 
@@ -104,11 +115,12 @@ Créé en Phase 1.4 (types partagés), enrichi en Phase 2.1 (intent engine), com
 
 - `IntentEngine` (`intent.engine.ts`) : classification dual-path LLM-first → regex fallback
   - `classify(text)` → `IntentResult` — méthode principale, ne lève jamais d'exception
-  - `classifyWithLLM(text)` → appelle `OllamaService.generateWith('small', ...)` avec `qwen3:4b` ; extrait le JSON en gérant les balises `<think>` (qwen3) et les blocs ` ```json ` ; retourne `null` si Ollama indisponible
+  - `classifyWithLLM(text)` → appelle `LlamaCppService.generateWith('large', ...)` ; extrait le JSON en gérant les balises `<think>` et les blocs ` ```json ` ; retourne `null` si le modèle est indisponible
   - `classifyWithRegex(text)` → miroir synchrone des patterns de `command_classifier.py`
 - `IntentType` (`intent.types.ts`) : enum de 18 types — mémoire (MEMORY_ADD, MEMORY_QUERY, MEMORY_UPDATE, MEMORY_DELETE), agenda (SCHEDULE_EVENT, QUERY_SCHEDULE), tâches (CREATE_TASK, QUERY_TASKS, COMPLETE_TASK), connaissance (RAG_QUESTION, GENERAL_QUESTION), objectifs (ADD_GOAL, QUERY_GOALS), actions (EXECUTE_ACTION), meta (CORRECTION, CONFIRMATION, REJECTION, CHITCHAT, UNKNOWN)
 - `IntentResult` : `{ intent, confidence: number, extractedContent, entities: ExtractedEntities, source: 'llm'|'regex', priority: 'high'|'normal'|'low', secondary? }`
-- `CLASSIFICATION_SYSTEM_PROMPT` (`classification-prompt.ts`) : prompt système en français pour qwen3:4b ; décrit les 18 types d'intents, impose un JSON strict sans prose ni balises markdown
+- `tryRegexOverride(text, llmResult)` : surcharge le résultat LLM par le résultat regex si la confiance LLM est < 0.75 — filet de sécurité contre les classifications temporelles ambiguës (scoped à `MEMORY_ADD` et `MEMORY_QUERY`)
+- `CLASSIFICATION_SYSTEM_PROMPT` (`classification-prompt.ts`) : prompt système en français ; décrit les 18 types d'intents, impose un JSON strict. Règle 8 : si la question contient un marqueur temporel (demain, hier, ce soir…) ET un pronom personnel (je, on, nous…), classifier en `memory_query` par défaut
 
 **AgentService** (`src/agent/agent.service.ts`) — orchestration Phase 2.2 + 2.3 :
 
@@ -271,12 +283,12 @@ Fichier `.env` dans `jarvis/` :
 # CORS
 CORS_ORIGINS=http://localhost:4200
 
-# Ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_LLM_SMALL_MODEL=qwen3:4b
-OLLAMA_LLM_MODEL=mistral:latest
-OLLAMA_LLM_LARGE_MODEL=qwen3.5:9b
-OLLAMA_EMBED_MODEL=qwen3-embedding:8b
+# llama.cpp (inférence locale)
+LLAMA_CPP_LLM_MODEL_PATH=./models/mistral-7b-instruct.gguf
+LLAMA_CPP_EMBED_MODEL_PATH=./models/bge-small-en-v1.5.gguf
+LLAMA_CPP_GPU_LAYERS=30
+LLAMA_CPP_CONTEXT_SIZE=2048
+LLAMA_CPP_TEMPERATURE=0.7
 
 # Qdrant
 QDRANTURL=http://127.0.0.1:6333
@@ -350,7 +362,7 @@ cd docker-qdrant && docker-compose up -d
 
 ## Flux de données principaux
 
-**Ingestion document :** Upload fichier → parsing (LangChain) → chunking (1000 chars, overlap 150) → embeddings (Ollama) → stockage Qdrant (`domainknowledge`)
+**Ingestion document :** Upload fichier → parsing (LangChain) → chunking (1000 chars, overlap 150) → embeddings (llama.cpp) → stockage Qdrant (`domainknowledge`)
 
 **RAG Q&A :** Question → embedding → recherche Qdrant top-K → contexte + prompt → LLM → réponse streamée (SSE)
 
@@ -378,5 +390,5 @@ Microphone (PyAudio) → OpenWakeWord ("Hey Jarvis")
 - Mémoire conversationnelle séparée des documents RAG (deux collections Qdrant distinctes)
 - Parsing temporel via chrono-node français (`forwardDate: true`)
 - Types de payload distincts : `RagPayload` (`src/rag/rag.types.ts`) pour les documents, `MemoryPayload` (`src/memory/memory.types.ts`) pour la mémoire
-- Routage LLM par taille (small/medium/large) via `OllamaService.resolveModel()` — jamais de nom de modèle en dur dans les services métier
+- Routage LLM par taille (small/medium/large) via `LlamaCppService.generateWith()` — single-model GGUF, `generateWith` délègue au modèle chargé quelle que soit la taille demandée
 - Événements mémoire via EventEmitter2 (`MEMORY_ADDED`, `MEMORY_SEARCHED`, `MEMORY_QUERIED`) — les listeners ne doivent pas bloquer le flux principal
