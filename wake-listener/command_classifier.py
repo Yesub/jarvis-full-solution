@@ -67,16 +67,16 @@ def _classify_with_llm(
         logger.debug("Classification LLM — réponse reçue: %s", resp.json())
         data = resp.json()
 
-        intent_raw = data.get("intent", "").upper()
-        content = data.get("content", text)
+        intent_raw = data.get("primary", "").lower()
+        content = data.get("extractedContent", text)
 
         logger.debug(
             "Classification LLM réussie. intent=%s content=%s", intent_raw, content
         )
 
-        if intent_raw == "ADD":
+        if intent_raw == "memory_add":
             return CommandType.ADD, content
-        elif intent_raw == "QUERY":
+        elif intent_raw in ("memory_query", "rag_question", "general_question"):
             return CommandType.QUERY, content
         else:
             return CommandType.UNKNOWN, content
